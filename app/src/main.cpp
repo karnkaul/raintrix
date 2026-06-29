@@ -4,7 +4,7 @@
 
 namespace {
 auto run(int const argc, char const* const* argv) -> int {
-	auto config_path = raintrix::default_config_path;
+	auto config_path = raintrix::defaults::config_path;
 	auto generate_config = false;
 	auto spec = clap::spec::Parameters{
 		.parameters =

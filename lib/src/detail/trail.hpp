@@ -1,16 +1,14 @@
 #pragma once
-#include "detail/char_set.hpp"
 #include "detail/column.hpp"
 #include "kvf/time.hpp"
 #include "le2d/random.hpp"
+#include "raintrix/defaults.hpp"
 
 namespace raintrix::detail {
 struct TrailCreateInfo {
-	static constexpr auto tile_height_v{20.0f};
-
-	std::string_view char_set{default_char_set_v}; // must be non-empty
-	float tile_height{tile_height_v};			   // must be > 0
-	kvf::Color trail_tint{kvf::green_v};
+	std::string_view char_set{defaults::char_set_v}; // must be non-empty
+	float tile_height{defaults::tile_height_v};		 // must be > 0 and <= 100
+	kvf::Color trail_tint{kvf::green_v};			 // alpha (.w) must be 255
 };
 
 class Trail : public le::IDrawable {

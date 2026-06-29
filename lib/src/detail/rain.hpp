@@ -3,16 +3,13 @@
 
 namespace raintrix::detail {
 struct RainCreateInfo {
-	static constexpr auto max_trail_count_v{10000};
-	static constexpr auto max_depth_v{4.0f};
-
 	glm::vec2 world_size{500.0f};
 
 	TrailCreateInfo trail_ci{};
-	int max_trail_count{max_trail_count_v}; // must be > 0
-	float density{1.0f};					// must be > 0 and < 10
-	float max_depth{max_depth_v};			// must be >= 1
-	float speed{1.0f};						// must be > 0.1 and < 10
+	int max_trail_count{defaults::max_trails_v}; // must be > 0 and <= 10000
+	float density{defaults::density_v};			 // must be > 0 and <= 10
+	float max_depth{defaults::max_depth_v};		 // must be >= 1 and <= 10
+	float speed{defaults::speed_v};				 // must be > 0.1 and <= 10
 };
 
 class Rain : public le::IDrawable {

@@ -1,9 +1,7 @@
 #pragma once
-#include <string>
+#include "raintrix/defaults.hpp"
 
 namespace raintrix {
-inline auto const default_config_path = std::string{"raintrix.conf"};
-
-auto generate_config(std::string const& path = default_config_path) -> bool;
+auto generate_config(std::string const& path = defaults::config_path) -> bool;
 void run_trix(std::string const& config_path) noexcept(false);
 } // namespace raintrix

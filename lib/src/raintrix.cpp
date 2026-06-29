@@ -6,6 +6,7 @@
 #include "detail/rain.hpp"
 #include "klib/file_io.hpp"
 #include "klib/log/tagged.hpp"
+#include "kvf/util.hpp"
 #include "le2d/context.hpp"
 #include "le2d/input/action.hpp"
 #include "le2d/input/action_mapping.hpp"
@@ -88,9 +89,16 @@ auto Reader::parse_file(klib::CString const path) -> bool {
 	return true;
 }
 
+void Writer::write_header(std::string_view const text) {
+	static constexpr auto hashes_v = std::string_view{"################\n"};
+	if (!m_text.empty()) { m_text.push_back('\n'); }
+	m_text.append(hashes_v);
+	if (!text.empty()) { std::format_to(std::back_inserter(m_text), "### {}\n{}", text, hashes_v); }
+}
+
 void Writer::write_variable(IVariable const& variable, std::string_view const description, WriteStatus const status) {
 	if (!m_text.empty()) { m_text.push_back('\n'); }
-	if (!description.empty()) { std::format_to(std::back_inserter(m_text), "# {}\n", description); }
+	if (!description.empty()) { std::format_to(std::back_inserter(m_text), "## {}\n", description); }
 	if (status == WriteStatus::Commented) { m_text.append("# "); }
 	std::format_to(std::back_inserter(m_text), "{} = {}\n", variable.get_key(), variable.serialize_value());
 }
@@ -137,6 +145,8 @@ auto Config::load_from(klib::CString const path) -> bool {
 	reader.track_variable(tile_height);
 	reader.track_variable(char_set);
 	reader.track_variable(resolution);
+	reader.track_variable(max_trails);
+	reader.track_variable(trail_tint);
 
 	return reader.parse_file(path);
 }
@@ -144,10 +154,20 @@ auto Config::load_from(klib::CString const path) -> bool {
 auto Config::save_to(klib::CString const path) const -> bool {
 	auto writer = cfg::Writer{};
 
-	writer.write_variable(font_path, "path to custom font file", cfg::WriteStatus::Commented);
-	writer.write_variable(tile_height, "glyph tile height (== width)");
-	writer.write_variable(char_set, "set to sample characters from");
+	writer.write_header("Window");
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
+
+	writer.write_header("Trails");
+	writer.write_variable(font_path, "path to custom font file");
+	writer.write_variable(tile_height, "glyph tile height (== width) (0, 100]");
+	writer.write_variable(char_set, "set to sample characters from (non-empty)");
+	writer.write_variable(trail_tint, "tint (color) of trail in 4-channel hex form (#RRGGBBAA) (alpha must be ff)");
+
+	writer.write_header("Rain");
+	writer.write_variable(max_trails, "maximum number of trails (0, 10000]");
+	writer.write_variable(density, "trail density (affects spawn rate) (0, 10]");
+	writer.write_variable(max_depth, "trail max depth / z (affects average trail scale), [1, 10]");
+	writer.write_variable(speed, "fall speed factor (affects average speed and time to live) (0.1, 10]");
 
 	return writer.write_to(path);
 }
@@ -216,7 +236,8 @@ auto Column::get_quad_at(this Self&& self, std::size_t index) -> T {
 namespace detail {
 Trail::Trail(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
-	KLIB_ASSERT(m_info.tile_height > 0.0f);
+	KLIB_ASSERT(m_info.tile_height > 0.0f && m_info.tile_height <= 100.0f);
+	KLIB_ASSERT(m_info.trail_tint.w == 255);
 }
 
 void Trail::tick(kvf::Seconds const dt) {
@@ -325,10 +346,10 @@ namespace detail {
 Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
 	KLIB_ASSERT(kvf::is_positive(m_info.world_size));
-	KLIB_ASSERT(m_info.max_trail_count > 0);
-	KLIB_ASSERT(m_info.max_depth >= 1.0f);
+	KLIB_ASSERT(m_info.max_trail_count > 0 && m_info.max_trail_count <= 10000);
+	KLIB_ASSERT(m_info.max_depth >= 1.0f && m_info.max_depth <= 10.0f);
 	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
-	KLIB_ASSERT(m_info.density > 0.0f & m_info.density < 10.0f);
+	KLIB_ASSERT(m_info.density > 0.0f & m_info.density <= 10.0f);
 
 	m_spawn_rate = kvf::Seconds{1.0f / (m_info.density * m_info.world_size.x)};
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 200.0f};
@@ -416,13 +437,80 @@ class App {
 	[[nodiscard]] auto get_window_ci() const -> le::WindowCreateInfo {
 		static constexpr auto fallback_v = le::FullscreenInfo{.title = "raintrix"};
 
-		auto const window_size = to_window_size(m_config.resolution.value);
-		if (!window_size) { return fallback_v; }
+		auto const resolution = to_lower(m_config.resolution.value);
+		if (resolution == defaults::resolution_v) { return fallback_v; }
+
+		auto const window_size = to_window_size(resolution);
+		if (!window_size) {
+			log.warn("invalid {}: '{}'", m_config.resolution.get_key(), m_config.resolution.value);
+			return fallback_v;
+		}
 
 		auto ret = le::WindowInfo{.size = *window_size, .title = "raintrix"};
 		ret.flags &= ~le::WindowFlag::Visible;
 		ret.flags &= ~le::WindowFlag::Decorated;
 		return ret;
+	}
+
+	[[nodiscard]] auto get_trail_ci() const -> detail::Trail::CreateInfo {
+		auto char_set = std::string_view{m_config.char_set.value};
+		if (char_set.empty()) {
+			log.warn("invalid (empty) {}", m_config.char_set.get_key());
+			char_set = defaults::char_set_v;
+		}
+
+		auto tile_height = m_config.tile_height.value;
+		if (tile_height <= 0.0f) {
+			log.warn("invalid {}: '{}'", m_config.tile_height.get_key(), m_config.tile_height.value);
+			tile_height = defaults::tile_height_v;
+		}
+
+		auto trail_tint = kvf::util::color_from_hex(m_config.trail_tint.value);
+		if (trail_tint.w < 255) {
+			log.warn("invalid {}: '{}", m_config.trail_tint.get_key(), m_config.trail_tint.value);
+			trail_tint = kvf::util::color_from_hex(defaults::trail_tint_v);
+		}
+
+		return detail::Trail::CreateInfo{
+			.char_set = char_set,
+			.tile_height = tile_height,
+			.trail_tint = trail_tint,
+		};
+	}
+
+	[[nodiscard]] auto get_rain_ci() const -> detail::Rain::CreateInfo {
+		auto max_trail_count = m_config.max_trails.value;
+		if (max_trail_count <= 0 || max_trail_count > 10000) {
+			log.warn("invalid {}: '{}'", m_config.max_trails.get_key(), m_config.max_trails.value);
+			max_trail_count = defaults::max_trails_v;
+		}
+
+		auto density = m_config.density.value;
+		if (density <= 0.0f || density > 10.0f) {
+			log.warn("invalid {}: '{}'", m_config.density.get_key(), m_config.density.value);
+			density = defaults::density_v;
+		}
+
+		auto max_depth = m_config.max_depth.value;
+		if (max_depth < 1.0f || max_depth > 10.0f) {
+			log.warn("invalid {}: '{}'", m_config.max_depth.get_key(), m_config.max_depth.value);
+			max_depth = defaults::max_depth_v;
+		}
+
+		auto speed = m_config.speed.value;
+		if (speed <= 0.1f || speed > 10.0f) {
+			log.warn("invalid {}: '{}'", m_config.speed.get_key(), m_config.speed.value);
+			speed = defaults::speed_v;
+		}
+
+		return detail::Rain::CreateInfo{
+			.world_size = m_context->framebuffer_size(),
+			.trail_ci = get_trail_ci(),
+			.max_trail_count = max_trail_count,
+			.density = density,
+			.max_depth = max_depth,
+			.speed = speed,
+		};
 	}
 
 	void load_config(std::string const& path) {
@@ -471,19 +559,7 @@ class App {
 	}
 
 	void create_rain() {
-		auto const fb_extent = m_context->get_render_device().get_framebuffer_extent();
-		glm::vec2 const fb_size = glm::ivec2{fb_extent.width, fb_extent.height};
-
-		auto const column_count = (int(fb_size.x) / int(m_config.tile_height.value)) + 1;
-
-		auto const trail_ci = detail::Trail::CreateInfo{
-			.char_set = m_config.char_set.value,
-			.tile_height = m_config.tile_height,
-		};
-		auto const rain_ci = detail::Rain::CreateInfo{
-			.world_size = fb_size,
-			.trail_ci = trail_ci,
-		};
+		auto const rain_ci = get_rain_ci();
 		m_rain.emplace(&m_random_engine, m_font.get(), rain_ci);
 	}
 
@@ -497,6 +573,7 @@ class App {
 
 	void run_loop() {
 		m_context->set_visible(true);
+
 		while (m_context->is_running()) {
 			m_context->next_frame();
 
@@ -526,7 +603,6 @@ class App {
 
 	le::input::Router m_input_router{};
 	le::input::ActionMapping m_action_mapping{};
-
 	le::input::action::KeyDigital m_exit{GLFW_KEY_ESCAPE};
 
 	std::optional<detail::Rain> m_rain{};
