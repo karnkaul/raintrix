@@ -1,0 +1,17 @@
+**/.vs/*
+**/.vscode/*
+build/*
+out/*
+.cache
+.DS_Store
+.clangd
+
+CMakeSettings.json
+compile_commands.json
+/CMakeUserPresets.json
+
+Doxyfile
+/docs
+
+raintrix.conf
+notes.txt
