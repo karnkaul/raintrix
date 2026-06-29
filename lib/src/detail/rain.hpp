@@ -3,18 +3,17 @@
 
 namespace raintrix::detail {
 struct RainCreateInfo {
-	static constexpr auto max_trail_count_v{500};
-	static constexpr auto trail_spawn_rate_v = kvf::Seconds{0.02s};
+	static constexpr auto max_trail_count_v{10000};
 	static constexpr auto max_depth_v{4.0f};
 
 	float world_width{500.0f};
 	int cell_count{10};
 
 	TrailCreateInfo trail_ci{};
-	int max_trail_count{max_trail_count_v};			   // must be > 0
-	kvf::Seconds trail_spawn_rate{trail_spawn_rate_v}; // must be > 0
-	float max_depth{max_depth_v};					   // must be >= 1
-	float speed{1.0f};								   // must be > 0.1 and < 10.0
+	int max_trail_count{max_trail_count_v}; // must be > 0
+	float density{1.0f};					// must be > 0 and < 10
+	float max_depth{max_depth_v};			// must be >= 1
+	float speed{1.0f};						// must be > 0.1 and < 10
 };
 
 class Rain : public le::IDrawable {
@@ -35,6 +34,7 @@ class Rain : public le::IDrawable {
 	gsl::not_null<le::Random*> m_random;
 	gsl::not_null<le::IFont*> m_font;
 	CreateInfo m_info{};
+	kvf::Seconds m_spawn_rate{};
 
 	std::vector<Trail> m_trails{};
 

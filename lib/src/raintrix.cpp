@@ -13,6 +13,7 @@
 #include "le2d/shape/quad.hpp"
 #include "raintrix/build_version.hpp"
 #include "raintrix/panic.hpp"
+#include <imgui.h>
 #include <algorithm>
 #include <array>
 #include <fstream>
@@ -86,7 +87,7 @@ auto Reader::parse_file(klib::CString const path) -> bool {
 	return true;
 }
 
-void Writer::write_variable(IVariable const& variable, WriteStatus const status, std::string_view const description) {
+void Writer::write_variable(IVariable const& variable, std::string_view const description, WriteStatus const status) {
 	if (!m_text.empty()) { m_text.push_back('\n'); }
 	if (!description.empty()) { std::format_to(std::back_inserter(m_text), "# {}\n", description); }
 	if (status == WriteStatus::Commented) { m_text.append("# "); }
@@ -138,6 +139,7 @@ auto Config::load_from(klib::CString const path) -> bool {
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
 	reader.track_variable(char_set);
+	reader.track_variable(resolution);
 
 	return reader.parse_file(path);
 }
@@ -145,9 +147,10 @@ auto Config::load_from(klib::CString const path) -> bool {
 auto Config::save_to(klib::CString const path) const -> bool {
 	auto writer = cfg::Writer{};
 
-	writer.write_variable(font_path, to_write_status(!font_path.value.empty()), "path to font file");
-	writer.write_variable(tile_height, cfg::WriteStatus::Active, "glyph tile height (== width)");
-	writer.write_variable(char_set, cfg::WriteStatus::Active, "set to sample characters from");
+	writer.write_variable(font_path, "path to font file", to_write_status(!font_path.value.empty()));
+	writer.write_variable(tile_height, "glyph tile height (== width)");
+	writer.write_variable(char_set, "set to sample characters from");
+	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
 
 	return writer.write_to(path);
 }
@@ -325,9 +328,11 @@ namespace detail {
 Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
 	KLIB_ASSERT(m_info.max_trail_count > 0);
-	KLIB_ASSERT(m_info.trail_spawn_rate > 0s);
 	KLIB_ASSERT(m_info.max_depth >= 1.0f);
 	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
+	KLIB_ASSERT(m_info.density > 0.0f & m_info.density < 10.0f);
+
+	m_spawn_rate = kvf::Seconds{1.0f / (m_info.density * m_info.world_width)};
 }
 
 void Rain::draw(le::IRenderer& renderer) const {
@@ -337,7 +342,7 @@ void Rain::draw(le::IRenderer& renderer) const {
 void Rain::tick(kvf::Seconds const dt) {
 	m_spawn_remain -= dt;
 	if (m_spawn_remain <= 0s) {
-		m_spawn_remain = m_info.trail_spawn_rate;
+		m_spawn_remain = m_spawn_rate;
 		spawn_trail();
 	}
 
@@ -379,6 +384,17 @@ void Rain::spawn_trail() {
 #pragma region app
 
 namespace {
+[[nodiscard]] auto to_window_size(std::string_view const input) -> std::optional<glm::ivec2> {
+	auto const x = input.find('x');
+	if (x == std::string_view::npos) { return {}; }
+	auto const width_str = input.substr(0, x);
+	auto const height_str = input.substr(x + 1);
+	auto ret = glm::ivec2{};
+	if (!cfg::assign_if(width_str, ret.x) || !cfg::assign_if(height_str, ret.y)) { return {}; }
+	if (!kvf::is_positive(ret)) { return {}; }
+	return ret;
+}
+
 class App {
   public:
 	void run(std::string const& config_path) {
@@ -395,6 +411,18 @@ class App {
 	}
 
   private:
+	[[nodiscard]] auto get_window_ci() const -> le::WindowCreateInfo {
+		static constexpr auto fallback_v = le::FullscreenInfo{.title = "raintrix"};
+
+		auto const window_size = to_window_size(m_config.resolution.value);
+		if (!window_size) { return fallback_v; }
+
+		auto ret = le::WindowInfo{.size = *window_size, .title = "raintrix"};
+		ret.flags &= ~le::WindowFlag::Visible;
+		ret.flags &= ~le::WindowFlag::Decorated;
+		return ret;
+	}
+
 	void load_config(std::string const& path) {
 		if (path.empty()) { return; }
 
@@ -412,21 +440,16 @@ class App {
 	}
 
 	void create_context() {
-		auto window_ci = le::WindowCreateInfo{};
-
-		auto window_info = le::WindowInfo{.size = {1280, 720}, .title = "raintrix"};
-		window_info.flags &= ~le::WindowFlag::Visible;
-		window_info.flags &= ~le::WindowFlag::Decorated;
-		window_ci = window_info;
-
 		auto const context_ci = le::ContextCreateInfo{
-			.window = window_ci,
+			.window = get_window_ci(),
 			.framebuffer_samples = vk::SampleCountFlagBits::e1,
 		};
 		m_context = le::Context::create(context_ci);
 		if (!m_context) { throw Panic{"Failed to create Context"}; }
 
 		m_waiter = m_context->create_waiter();
+
+		ImGui::GetIO().IniFilename = nullptr;
 	}
 
 	void create_font() {
@@ -456,9 +479,6 @@ class App {
 	void bind_actions() {
 		m_action_mapping.bind_action(&m_exit, [this](le::input::action::Value const& v) {
 			if (v.get<bool>()) { m_context->set_window_close(); }
-		});
-		m_action_mapping.bind_action(&m_toggle_editor, [this](le::input::action::Value const& v) {
-			// TODO: toggle editor.
 		});
 
 		m_input_router.push_mapping(&m_action_mapping);
@@ -497,7 +517,6 @@ class App {
 	le::input::ActionMapping m_action_mapping{};
 
 	le::input::action::KeyDigital m_exit{GLFW_KEY_ESCAPE};
-	le::input::action::KeyDigital m_toggle_editor{GLFW_KEY_E};
 
 	std::optional<detail::Rain> m_rain{};
 

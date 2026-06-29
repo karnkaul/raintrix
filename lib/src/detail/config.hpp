@@ -12,5 +12,6 @@ struct Config {
 	cfg::Variable<std::string> font_path{"FONT_PATH"};
 	cfg::Variable<float> tile_height{"TILE_HEIGHT", 32.0f};
 	cfg::Variable<std::string> char_set{"CHAR_SET", std::string{default_char_set_v}};
+	cfg::Variable<std::string> resolution{"RESOLUTION", "fullscreen"};
 };
 } // namespace raintrix::detail
