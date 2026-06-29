@@ -6,6 +6,9 @@
 #include "klib/file_io.hpp"
 #include "klib/log/tagged.hpp"
 #include "le2d/context.hpp"
+#include "le2d/input/action.hpp"
+#include "le2d/input/action_mapping.hpp"
+#include "le2d/input/router.hpp"
 #include "le2d/random.hpp"
 #include "le2d/shape/quad.hpp"
 #include "raintrix/build_version.hpp"
@@ -212,7 +215,9 @@ auto Column::get_quad_at(this Self&& self, std::size_t index) -> T {
 
 namespace detail {
 Trail::Trail(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
-	: m_random(random_engine), m_font(font), m_info(create_info) {}
+	: m_random(random_engine), m_font(font), m_info(create_info) {
+	KLIB_ASSERT(m_info.tile_height > 0.0f);
+}
 
 void Trail::tick(kvf::Seconds const dt) {
 	if (m_active) { tick_head(dt); }
@@ -318,7 +323,12 @@ void Trail::deactivate() {
 
 namespace detail {
 Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
-	: m_random(random_engine), m_font(font), m_info(create_info) {}
+	: m_random(random_engine), m_font(font), m_info(create_info) {
+	KLIB_ASSERT(m_info.max_trail_count > 0);
+	KLIB_ASSERT(m_info.trail_spawn_rate > 0s);
+	KLIB_ASSERT(m_info.max_depth >= 1.0f);
+	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
+}
 
 void Rain::draw(le::IRenderer& renderer) const {
 	for (auto const& trail : m_trails) { trail.draw(renderer); }
@@ -353,10 +363,13 @@ void Rain::spawn_trail() {
 
 	auto const half_width = 0.5f * m_info.world_width;
 	trail->transform.position.x = m_random->next_float(-half_width, half_width);
-	trail->transform.scale = glm::vec2{m_random->next_float(0.25f, 1.0f)};
+	if (m_info.max_depth > 1.0f) {
+		auto const min_scale = 1.0f / m_info.max_depth;
+		trail->transform.scale = glm::vec2{m_random->next_float(min_scale, 1.0f)};
+	}
 
-	auto const speed = m_random->next_float(10.0f, 20.0f);
-	auto const ttl = kvf::Seconds{m_random->next_float(2.0f, 5.0f)};
+	auto const speed = m_info.speed * m_random->next_float(10.0f, 20.0f);
+	auto const ttl = kvf::Seconds{m_random->next_float(1.0f, 3.0f) / m_info.speed};
 	trail->start_fall(speed, ttl);
 }
 } // namespace detail
@@ -376,6 +389,7 @@ class App {
 		create_context();
 		create_font();
 		create_rain();
+		bind_actions();
 
 		run_loop();
 	}
@@ -398,11 +412,15 @@ class App {
 	}
 
 	void create_context() {
-		auto window_ci = le::WindowInfo{.size = {1280, 720}, .title = "raintrix"};
-		window_ci.flags &= ~le::WindowFlag::Visible;
+		auto window_ci = le::WindowCreateInfo{};
+
+		auto window_info = le::WindowInfo{.size = {1280, 720}, .title = "raintrix"};
+		window_info.flags &= ~le::WindowFlag::Visible;
+		window_info.flags &= ~le::WindowFlag::Decorated;
+		window_ci = window_info;
 
 		auto const context_ci = le::ContextCreateInfo{
-			.window = le::WindowInfo{.size = {1280, 720}, .title = "raintrix"},
+			.window = window_ci,
 			.framebuffer_samples = vk::SampleCountFlagBits::e1,
 		};
 		m_context = le::Context::create(context_ci);
@@ -435,12 +453,23 @@ class App {
 		m_rain.emplace(&m_random_engine, m_font.get(), rain_ci);
 	}
 
-	void run_loop() {
-		// m_rain->initialize();
+	void bind_actions() {
+		m_action_mapping.bind_action(&m_exit, [this](le::input::action::Value const& v) {
+			if (v.get<bool>()) { m_context->set_window_close(); }
+		});
+		m_action_mapping.bind_action(&m_toggle_editor, [this](le::input::action::Value const& v) {
+			// TODO: toggle editor.
+		});
 
+		m_input_router.push_mapping(&m_action_mapping);
+	}
+
+	void run_loop() {
+		m_context->set_visible(true);
 		while (m_context->is_running()) {
 			m_context->next_frame();
 
+			m_input_router.dispatch(m_context->event_queue());
 			m_rain->tick(m_context->get_frame_stats().frame_dt);
 
 			auto& renderer = m_context->begin_render();
@@ -463,6 +492,12 @@ class App {
 	std::unique_ptr<le::IFont> m_font{};
 
 	le::Random m_random_engine{};
+
+	le::input::Router m_input_router{};
+	le::input::ActionMapping m_action_mapping{};
+
+	le::input::action::KeyDigital m_exit{GLFW_KEY_ESCAPE};
+	le::input::action::KeyDigital m_toggle_editor{GLFW_KEY_E};
 
 	std::optional<detail::Rain> m_rain{};
 

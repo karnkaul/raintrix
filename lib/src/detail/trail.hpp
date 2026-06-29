@@ -6,9 +6,11 @@
 
 namespace raintrix::detail {
 struct TrailCreateInfo {
-	std::string_view char_set{default_char_set_v};
+	static constexpr auto tile_height_v{20.0f};
+
+	std::string_view char_set{default_char_set_v}; // must be non-empty
+	float tile_height{tile_height_v};			   // must be > 0
 	kvf::Color trail_tint{kvf::green_v};
-	float tile_height{20.0f};
 };
 
 class Trail : public le::IDrawable {
