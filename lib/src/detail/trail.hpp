@@ -46,8 +46,8 @@ class Trail : public le::IDrawable {
 	kvf::Seconds m_advance_rate{};
 	kvf::Seconds m_ttl{};
 
-	kvf::Seconds m_advance_elapsed{};
-	kvf::Seconds m_ttl_elapsed{};
+	kvf::Seconds m_advance_remain{};
+	kvf::Seconds m_ttl_remain{};
 	int m_head_index{};
 	bool m_active{};
 };
