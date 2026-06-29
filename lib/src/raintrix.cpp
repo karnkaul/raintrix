@@ -349,7 +349,7 @@ Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> f
 	KLIB_ASSERT(m_info.max_trail_count > 0 && m_info.max_trail_count <= 10000);
 	KLIB_ASSERT(m_info.max_depth >= 1.0f && m_info.max_depth <= 10.0f);
 	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
-	KLIB_ASSERT(m_info.density > 0.0f & m_info.density <= 10.0f);
+	KLIB_ASSERT(m_info.density > 0.0f && m_info.density <= 10.0f);
 
 	m_spawn_rate = kvf::Seconds{1.0f / (m_info.density * m_info.world_size.x)};
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 200.0f};
