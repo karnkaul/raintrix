@@ -8,3 +8,8 @@ target_link_libraries(${package_name} PRIVATE
 target_sources(${package_name} PRIVATE
   src/main.cpp
 )
+
+if(RAINTRIX_INSTALL)
+  include(GNUInstallDirs)
+  install(TARGETS ${package_name})
+endif()
