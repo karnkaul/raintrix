@@ -210,6 +210,8 @@ auto Config::load_from(klib::CString const path) -> bool {
 }
 
 auto Config::save_to(klib::CString const path) const -> bool {
+	if (path.as_view().empty()) { return false; }
+
 	auto writer = cfg::Writer{};
 
 	writer.write_header("Window");
@@ -547,13 +549,17 @@ class App {
 		};
 	}
 
+	auto try_load_config(klib::CString path) -> bool {
+		if (!m_config.load_from(path)) { return false; }
+		log.info("Config loaded from '{}'", path);
+		return true;
+	}
+
 	void load_config(std::string const& path) {
-		if (!path.empty()) {
-			if (m_config.load_from(path)) {
-				log.info("Config loaded from '{}'", path);
-			} else {
-				log.warn("failed to load Config from '{}'", path);
-			}
+		if (path.empty()) {
+			try_load_config(defaults::config_path);
+		} else if (!try_load_config(path)) {
+			log.warn("failed to load Config from '{}'", path);
 		}
 		m_post_config = detail::Config::Post::process(m_config);
 	}
