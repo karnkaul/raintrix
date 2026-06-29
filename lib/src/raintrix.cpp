@@ -1,4 +1,5 @@
 #include "raintrix/raintrix.hpp"
+#include "bin/font.hpp"
 #include "cfg/io.hpp"
 #include "cfg/variable.hpp"
 #include "detail/config.hpp"
@@ -129,10 +130,6 @@ void cfg::assign_if(std::string_view const input, std::string& out) { out = inpu
 #pragma region config
 
 namespace detail {
-namespace {
-[[nodiscard]] constexpr auto to_write_status(bool const active) { return active ? cfg::WriteStatus::Active : cfg::WriteStatus::Commented; }
-} // namespace
-
 auto Config::load_from(klib::CString const path) -> bool {
 	auto reader = cfg::Reader{};
 
@@ -147,7 +144,7 @@ auto Config::load_from(klib::CString const path) -> bool {
 auto Config::save_to(klib::CString const path) const -> bool {
 	auto writer = cfg::Writer{};
 
-	writer.write_variable(font_path, "path to font file", to_write_status(!font_path.value.empty()));
+	writer.write_variable(font_path, "path to custom font file", cfg::WriteStatus::Commented);
 	writer.write_variable(tile_height, "glyph tile height (== width)");
 	writer.write_variable(char_set, "set to sample characters from");
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
@@ -327,12 +324,15 @@ void Trail::deactivate() {
 namespace detail {
 Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
+	KLIB_ASSERT(kvf::is_positive(m_info.world_size));
 	KLIB_ASSERT(m_info.max_trail_count > 0);
 	KLIB_ASSERT(m_info.max_depth >= 1.0f);
 	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
 	KLIB_ASSERT(m_info.density > 0.0f & m_info.density < 10.0f);
 
-	m_spawn_rate = kvf::Seconds{1.0f / (m_info.density * m_info.world_width)};
+	m_spawn_rate = kvf::Seconds{1.0f / (m_info.density * m_info.world_size.x)};
+	m_base_ttl = kvf::Seconds{m_info.world_size.y / 200.0f};
+	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
 }
 
 void Rain::draw(le::IRenderer& renderer) const {
@@ -349,7 +349,7 @@ void Rain::tick(kvf::Seconds const dt) {
 	for (auto& trail : m_trails) { trail.tick(dt); }
 }
 
-auto Rain::get_fresh_trail() -> klib::Ptr<Trail> {
+auto Rain::next_inactive_trail() -> klib::Ptr<Trail> {
 	for (auto& trail : m_trails) {
 		if (trail.get_status() == Trail::Status::Completed) { return &trail; }
 	}
@@ -358,23 +358,25 @@ auto Rain::get_fresh_trail() -> klib::Ptr<Trail> {
 
 	m_trails.emplace_back(m_random, m_font, m_info.trail_ci);
 	auto& ret = m_trails.back();
-	ret.randomize_cells(m_info.cell_count);
+
+	ret.randomize_cells(m_cell_count);
 	return &ret;
 }
 
 void Rain::spawn_trail() {
-	auto trail = get_fresh_trail();
+	auto trail = next_inactive_trail();
 	if (!trail) { return; }
 
-	auto const half_width = 0.5f * m_info.world_width;
+	auto const half_width = 0.5f * m_info.world_size.x;
 	trail->transform.position.x = m_random->next_float(-half_width, half_width);
+
 	if (m_info.max_depth > 1.0f) {
 		auto const min_scale = 1.0f / m_info.max_depth;
 		trail->transform.scale = glm::vec2{m_random->next_float(min_scale, 1.0f)};
 	}
 
 	auto const speed = m_info.speed * m_random->next_float(10.0f, 20.0f);
-	auto const ttl = kvf::Seconds{m_random->next_float(1.0f, 3.0f) / m_info.speed};
+	auto const ttl = m_base_ttl * (m_random->next_float(1.0f, 3.0f) / m_info.speed);
 	trail->start_fall(speed, ttl);
 }
 } // namespace detail
@@ -434,9 +436,19 @@ class App {
 	}
 
 	void load_font_bytes() {
-		auto const font_path = klib::CString{m_config.font_path.value};
-		if (!klib::read_file_bytes_into(m_font_bytes, font_path)) { throw Panic{std::format("Failed to load font: '{}'", font_path)}; }
-		log.info("font bytes loaded from '{}'", font_path);
+		if (!m_config.font_path.value.empty()) {
+			auto const font_path = klib::CString{m_config.font_path.value};
+			if (klib::read_file_bytes_into(m_font_bytes, font_path)) {
+				log.info("font bytes loaded from '{}'", font_path);
+			} else {
+				log.warn("failed to load font from path: '{}'", font_path);
+			}
+		}
+
+		if (m_font_bytes.empty()) {
+			auto const font_bytes = bin::font_bytes();
+			m_font_bytes = {font_bytes.begin(), font_bytes.end()};
+		}
 	}
 
 	void create_context() {
@@ -469,8 +481,7 @@ class App {
 			.tile_height = m_config.tile_height,
 		};
 		auto const rain_ci = detail::Rain::CreateInfo{
-			.world_width = fb_size.x,
-			.cell_count = column_count,
+			.world_size = fb_size,
 			.trail_ci = trail_ci,
 		};
 		m_rain.emplace(&m_random_engine, m_font.get(), rain_ci);

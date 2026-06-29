@@ -6,8 +6,7 @@ struct RainCreateInfo {
 	static constexpr auto max_trail_count_v{10000};
 	static constexpr auto max_depth_v{4.0f};
 
-	float world_width{500.0f};
-	int cell_count{10};
+	glm::vec2 world_size{500.0f};
 
 	TrailCreateInfo trail_ci{};
 	int max_trail_count{max_trail_count_v}; // must be > 0
@@ -27,14 +26,16 @@ class Rain : public le::IDrawable {
 	void tick(kvf::Seconds dt);
 
   private:
-	[[nodiscard]] auto get_fresh_trail() -> klib::Ptr<Trail>;
+	[[nodiscard]] auto next_inactive_trail() -> klib::Ptr<Trail>;
 
 	void spawn_trail();
 
 	gsl::not_null<le::Random*> m_random;
 	gsl::not_null<le::IFont*> m_font;
 	CreateInfo m_info{};
+	int m_cell_count{};
 	kvf::Seconds m_spawn_rate{};
+	kvf::Seconds m_base_ttl{};
 
 	std::vector<Trail> m_trails{};
 
