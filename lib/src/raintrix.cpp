@@ -164,6 +164,31 @@ void ensure_valid(cfg::Variable<T>& out, U const& fallback, FuncT pred) {
 	if (!kvf::is_positive(ret)) { return {}; }
 	return Config::Windowed{.size = ret};
 }
+
+template <typename Type, typename Cmp>
+[[nodiscard]] constexpr auto cmp_symbol() -> char {
+	if constexpr (std::same_as<Cmp, std::less<Type>>) {
+		return ')';
+	} else if constexpr (std::same_as<Cmp, std::less_equal<Type>>) {
+		return ']';
+	} else if constexpr (std::same_as<Cmp, std::greater<Type>>) {
+		return '(';
+	} else if constexpr (std::same_as<Cmp, std::greater_equal<Type>>) {
+		return '[';
+	} else {
+		return ' ';
+	}
+}
+
+template <typename LimitT>
+[[nodiscard]] auto serialize(LimitT const& limit) -> std::string {
+	using Type = typename LimitT::type;
+	using LowerT = typename LimitT::lower_type;
+	using UpperT = typename LimitT::upper_type;
+	static constexpr auto lower_v = cmp_symbol<Type, LowerT>();
+	static constexpr auto upper_v = cmp_symbol<Type, UpperT>();
+	return std::format("{}{}, {}{}", lower_v, limit.lo, limit.hi, upper_v);
+}
 } // namespace
 
 auto Config::load_from(klib::CString const path) -> bool {
@@ -192,15 +217,15 @@ auto Config::save_to(klib::CString const path) const -> bool {
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
-	writer.write_variable(tile_height, "glyph tile height (== width) (0, 100]");
+	writer.write_variable(tile_height, std::format("glyph tile height (== width) {}", serialize(limits::tile_height_v)));
 	writer.write_variable(char_set, "set to sample characters from (non-empty)");
 	writer.write_variable(trail_tint, "tint (color) of trail in 4-channel hex form (#RRGGBBAA) (alpha must be ff)");
 
 	writer.write_header("Rain");
-	writer.write_variable(max_trails, "maximum number of trails (0, 10000]");
-	writer.write_variable(density, "trail density (affects spawn rate) (0, 10]");
-	writer.write_variable(max_depth, "trail max depth / z (affects average trail scale), [1, 10]");
-	writer.write_variable(speed, "fall speed factor (affects average speed and time to live) (0.1, 10]");
+	writer.write_variable(max_trails, std::format("maximum number of trails {}", serialize(limits::max_trails_v)));
+	writer.write_variable(density, std::format("trail density (affects spawn rate) (0, 10]", serialize(limits::density_v)));
+	writer.write_variable(max_depth, std::format("trail max depth / z (affects average trail scale), {}", serialize(limits::max_depth_v)));
+	writer.write_variable(speed, std::format("fall speed factor (affects average speed and time to live) {}", serialize(limits::speed_v)));
 
 	return writer.write_to(path);
 }

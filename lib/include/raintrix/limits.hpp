@@ -4,7 +4,11 @@
 namespace raintrix {
 template <typename Type, template <typename> typename LowerT, template <typename> typename UpperT>
 struct Limit {
-	[[nodiscard]] constexpr auto in_range(Type const value) const -> bool { return LowerT<Type>{}(value, lo) && UpperT<Type>{}(value, hi); }
+	using type = Type;
+	using lower_type = LowerT<Type>;
+	using upper_type = UpperT<Type>;
+
+	[[nodiscard]] constexpr auto in_range(Type const value) const -> bool { return lower_type{}(value, lo) && upper_type{}(value, hi); }
 	constexpr auto operator()(Type const value) const -> bool { return in_range(value); }
 
 	Type lo{};
