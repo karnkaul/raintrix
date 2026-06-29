@@ -1,4 +1,5 @@
 #include "clap/parser.hpp"
+#include "raintrix/build_version.hpp"
 #include "raintrix/raintrix.hpp"
 #include <print>
 
@@ -9,13 +10,13 @@ auto run(int const argc, char const* const* argv) -> int {
 	auto spec = clap::spec::Parameters{
 		.parameters =
 			{
-				clap::named_option(config_path, "c,config", "path to config"),
 				clap::named_flag(generate_config, "g,generate", "generate config"),
+				clap::positional_optional(config_path, "CONFIG", "path to config"),
 			},
 		.program =
 			{
 				.name = "raintrix",
-				// TODO: version
+				.version = raintrix::build_version_v,
 			},
 	};
 	auto parser = clap::Parser{std::move(spec)};
