@@ -1,15 +1,11 @@
-# le2d
+# raintrix
 
-## 2D Game engine framework
+## Matrix-inspired text rain effect
 
-[![Build Status](https://github.com/karnkaul/le2d/actions/workflows/ci.yml/badge.svg)](https://github.com/karnkaul/le2d/actions/workflows/ci.yml)
-
-## Documentation
-
-Documentation is hosted [here](https://karnkaul.github.io/le2d/).
+[![Build Status](https://github.com/karnkaul/raintrix/actions/workflows/ci.yml/badge.svg)](https://github.com/karnkaul/raintrix/actions/workflows/ci.yml)
 
 ## Contributing
 
 Pull/merge requests are welcome.
 
-**[Original repository](https://github.com/karnkaul/le2d)**
+**[Original repository](https://github.com/karnkaul/raintrix)**
