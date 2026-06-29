@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.3)
 
 set(package_name raintrix)
-set(build_version 0.1.1)
+set(build_version 0.1.2)
 project(${package_name} VERSION ${build_version})
 
 set(CMAKE_CXX_STANDARD 23)
