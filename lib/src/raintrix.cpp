@@ -6,6 +6,7 @@
 #include "detail/rain.hpp"
 #include "klib/file_io.hpp"
 #include "klib/log/tagged.hpp"
+#include "klib/visitor.hpp"
 #include "kvf/util.hpp"
 #include "le2d/context.hpp"
 #include "le2d/input/action.hpp"
@@ -14,6 +15,7 @@
 #include "le2d/random.hpp"
 #include "le2d/shape/quad.hpp"
 #include "raintrix/build_version.hpp"
+#include "raintrix/limits.hpp"
 #include "raintrix/panic.hpp"
 #include <imgui.h>
 #include <algorithm>
@@ -115,13 +117,13 @@ void cfg::assign_if(std::string_view input, bool& out) {
 	auto const value = to_lower(input);
 	auto const is_match = [&value](std::string_view const target) { return value == target; };
 
-	static constexpr auto truthys = std::array{"true", "on"};
+	static constexpr auto truthys = std::array{"true", "on", "y", "yes"};
 	if (std::ranges::any_of(truthys, is_match)) {
 		out = true;
 		return;
 	}
 
-	static constexpr auto falseys = std::array{"false", "off"};
+	static constexpr auto falseys = std::array{"false", "off", "no", "n"};
 	if (std::ranges::any_of(falseys, is_match)) {
 		out = false;
 		return;
@@ -138,6 +140,57 @@ void cfg::assign_if(std::string_view const input, std::string& out) { out = inpu
 #pragma region config
 
 namespace detail {
+namespace {
+template <typename T, typename FuncT>
+auto check_valid(cfg::Variable<T> const& out, FuncT pred) -> bool {
+	if (pred(out.value)) { return true; }
+	log.warn("invalid {}: '{}'", out.get_key(), out.value);
+	return false;
+}
+
+template <typename T, typename U, typename FuncT>
+void ensure_valid(cfg::Variable<T>& out, U const& fallback, FuncT pred) {
+	if (check_valid(out, pred)) { return; }
+	out.value = fallback;
+}
+
+[[nodiscard]] auto to_windowed(std::string_view const input) -> std::optional<Config::Windowed> {
+	auto const x = input.find('x');
+	if (x == std::string_view::npos) { return {}; }
+	auto const width_str = input.substr(0, x);
+	auto const height_str = input.substr(x + 1);
+	auto ret = glm::ivec2{};
+	if (!cfg::assign_if(width_str, ret.x) || !cfg::assign_if(height_str, ret.y)) { return {}; }
+	if (!kvf::is_positive(ret)) { return {}; }
+	return Config::Windowed{.size = ret};
+}
+
+template <typename Type, typename Cmp>
+[[nodiscard]] constexpr auto cmp_symbol() -> char {
+	if constexpr (std::same_as<Cmp, std::less<Type>>) {
+		return ')';
+	} else if constexpr (std::same_as<Cmp, std::less_equal<Type>>) {
+		return ']';
+	} else if constexpr (std::same_as<Cmp, std::greater<Type>>) {
+		return '(';
+	} else if constexpr (std::same_as<Cmp, std::greater_equal<Type>>) {
+		return '[';
+	} else {
+		return ' ';
+	}
+}
+
+template <typename LimitT>
+[[nodiscard]] auto serialize(LimitT const& limit) -> std::string {
+	using Type = typename LimitT::type;
+	using LowerT = typename LimitT::lower_type;
+	using UpperT = typename LimitT::upper_type;
+	static constexpr auto lower_v = cmp_symbol<Type, LowerT>();
+	static constexpr auto upper_v = cmp_symbol<Type, UpperT>();
+	return std::format("{}{}, {}{}", lower_v, limit.lo, limit.hi, upper_v);
+}
+} // namespace
+
 auto Config::load_from(klib::CString const path) -> bool {
 	auto reader = cfg::Reader{};
 
@@ -157,6 +210,8 @@ auto Config::load_from(klib::CString const path) -> bool {
 }
 
 auto Config::save_to(klib::CString const path) const -> bool {
+	if (path.as_view().empty()) { return false; }
+
 	auto writer = cfg::Writer{};
 
 	writer.write_header("Window");
@@ -164,17 +219,50 @@ auto Config::save_to(klib::CString const path) const -> bool {
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
-	writer.write_variable(tile_height, "glyph tile height (== width) (0, 100]");
+	writer.write_variable(tile_height, std::format("glyph tile height (== width) {}", serialize(limits::tile_height_v)));
 	writer.write_variable(char_set, "set to sample characters from (non-empty)");
 	writer.write_variable(trail_tint, "tint (color) of trail in 4-channel hex form (#RRGGBBAA) (alpha must be ff)");
 
 	writer.write_header("Rain");
-	writer.write_variable(max_trails, "maximum number of trails (0, 10000]");
-	writer.write_variable(density, "trail density (affects spawn rate) (0, 10]");
-	writer.write_variable(max_depth, "trail max depth / z (affects average trail scale), [1, 10]");
-	writer.write_variable(speed, "fall speed factor (affects average speed and time to live) (0.1, 10]");
+	writer.write_variable(max_trails, std::format("maximum number of trails {}", serialize(limits::max_trails_v)));
+	writer.write_variable(density, std::format("trail density (affects spawn rate) (0, 10]", serialize(limits::density_v)));
+	writer.write_variable(max_depth, std::format("trail max depth / z (affects average trail scale), {}", serialize(limits::max_depth_v)));
+	writer.write_variable(speed, std::format("fall speed factor (affects average speed and time to live) {}", serialize(limits::speed_v)));
 
 	return writer.write_to(path);
+}
+
+auto Config::Post::process(Config& out) -> Config::Post {
+	auto ret = Post{};
+	check_valid(out.resolution, [&ret](std::string_view const in) {
+		auto const resolution = to_lower(in);
+		if (resolution == defaults::resolution_v) {
+			ret.resolution = Fullscreen{};
+			return true;
+		}
+
+		auto const windowed = to_windowed(resolution);
+		if (!windowed || !kvf::is_positive(windowed->size)) { return false; }
+
+		ret.resolution = *windowed;
+		return true;
+	});
+
+	ensure_valid(out.tile_height, defaults::tile_height_v, limits::tile_height_v);
+	ensure_valid(out.char_set, defaults::char_set_v, [](std::string_view const in) { return !in.empty(); });
+	check_valid(out.trail_tint, [&ret](std::string_view const hex) {
+		auto tint = kvf::util::color_from_hex(hex);
+		if (tint.w != 0xff) { return false; }
+		ret.trail_tint = tint;
+		return true;
+	});
+
+	ensure_valid(out.max_trails, defaults::max_trails_v, limits::max_trails_v);
+	ensure_valid(out.density, defaults::density_v, limits::density_v);
+	ensure_valid(out.max_depth, defaults::max_depth_v, limits::max_depth_v);
+	ensure_valid(out.speed, defaults::speed_v, limits::speed_v);
+
+	return ret;
 }
 } // namespace detail
 
@@ -241,7 +329,7 @@ auto Column::get_quad_at(this Self&& self, std::size_t index) -> T {
 namespace detail {
 Trail::Trail(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
-	KLIB_ASSERT(m_info.tile_height > 0.0f && m_info.tile_height <= 100.0f);
+	KLIB_ASSERT(limits::tile_height_v.in_range(m_info.tile_height));
 	KLIB_ASSERT(m_info.trail_tint.w == 255);
 }
 
@@ -249,8 +337,8 @@ void Trail::tick(kvf::Seconds const dt) {
 	if (m_active) { tick_head(dt); }
 	tick_tail(dt);
 	if (m_active) {
-		m_ttl_elapsed += dt;
-		if (m_ttl_elapsed >= m_ttl) { deactivate(); }
+		m_ttl_remain -= dt;
+		if (m_ttl_remain <= 0s) { deactivate(); }
 	}
 	m_column.transform = transform;
 }
@@ -271,7 +359,8 @@ void Trail::randomize_cells(int const count) {
 void Trail::start_fall(float const speed, kvf::Seconds const ttl) {
 	m_advance_rate = kvf::Seconds{1.0f / speed};
 	m_ttl = ttl;
-	m_advance_elapsed = m_ttl_elapsed = 0s;
+	m_advance_remain = m_advance_rate;
+	m_ttl_remain = m_ttl;
 	m_head_index = 0;
 	m_active = true;
 
@@ -297,10 +386,10 @@ auto Trail::get_status() const -> Status {
 }
 
 void Trail::tick_head(kvf::Seconds const dt) {
-	m_advance_elapsed += dt;
-	if (m_advance_elapsed < m_advance_rate) { return; }
+	m_advance_remain -= dt;
+	if (m_advance_remain > 0s) { return; }
 
-	m_advance_elapsed = 0s;
+	m_advance_remain = m_advance_rate;
 
 	auto const quad_count = int(m_column.quad_count());
 	KLIB_ASSERT(m_head_index >= 0 && m_head_index < quad_count);
@@ -351,10 +440,10 @@ namespace detail {
 Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
 	KLIB_ASSERT(kvf::is_positive(m_info.world_size));
-	KLIB_ASSERT(m_info.max_trail_count > 0 && m_info.max_trail_count <= 10000);
-	KLIB_ASSERT(m_info.max_depth >= 1.0f && m_info.max_depth <= 10.0f);
-	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
-	KLIB_ASSERT(m_info.density > 0.0f && m_info.density <= 10.0f);
+	KLIB_ASSERT(limits::max_trails_v.in_range(m_info.max_trail_count));
+	KLIB_ASSERT(limits::max_depth_v.in_range(m_info.max_depth));
+	KLIB_ASSERT(limits::speed_v.in_range(m_info.speed));
+	KLIB_ASSERT(limits::density_v.in_range(m_info.density));
 
 	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 500.0f};
@@ -383,9 +472,7 @@ auto Rain::next_inactive_trail() -> klib::Ptr<Trail> {
 
 	if (int(m_trails.size()) >= m_info.max_trail_count) { return nullptr; }
 
-	m_trails.emplace_back(m_random, m_font, m_info.trail_ci);
-	auto& ret = m_trails.back();
-
+	auto& ret = m_trails.emplace_back(m_random, m_font, m_info.trail_ci);
 	ret.randomize_cells(m_cell_count);
 	return &ret;
 }
@@ -414,17 +501,6 @@ void Rain::spawn_trail() {
 #pragma region app
 
 namespace {
-[[nodiscard]] auto to_window_size(std::string_view const input) -> std::optional<glm::ivec2> {
-	auto const x = input.find('x');
-	if (x == std::string_view::npos) { return {}; }
-	auto const width_str = input.substr(0, x);
-	auto const height_str = input.substr(x + 1);
-	auto ret = glm::ivec2{};
-	if (!cfg::assign_if(width_str, ret.x) || !cfg::assign_if(height_str, ret.y)) { return {}; }
-	if (!kvf::is_positive(ret)) { return {}; }
-	return ret;
-}
-
 class App {
   public:
 	void run(std::string const& config_path) {
@@ -442,92 +518,50 @@ class App {
 
   private:
 	[[nodiscard]] auto get_window_ci() const -> le::WindowCreateInfo {
-		static constexpr auto fallback_v = le::FullscreenInfo{.title = "raintrix"};
-
-		auto const resolution = to_lower(m_config.resolution.value);
-		if (resolution == defaults::resolution_v) { return fallback_v; }
-
-		auto const window_size = to_window_size(resolution);
-		if (!window_size) {
-			log.warn("invalid {}: '{}'", m_config.resolution.get_key(), m_config.resolution.value);
-			return fallback_v;
-		}
-
-		auto ret = le::WindowInfo{.size = *window_size, .title = "raintrix"};
-		ret.flags &= ~le::WindowFlag::Visible;
-		ret.flags &= ~le::WindowFlag::Decorated;
-		return ret;
+		auto const visitor = klib::Visitor{
+			[&](detail::Config::Fullscreen) -> le::WindowCreateInfo { return le::FullscreenInfo{.title = "raintrix"}; },
+			[&](detail::Config::Windowed const& w) -> le::WindowCreateInfo {
+				auto ret = le::WindowInfo{.size = w.size, .title = "raintrix"};
+				ret.flags &= ~le::WindowFlag::Visible;
+				ret.flags &= ~le::WindowFlag::Decorated;
+				return ret;
+			},
+		};
+		return std::visit(visitor, m_post_config.resolution);
 	}
 
 	[[nodiscard]] auto get_trail_ci() const -> detail::Trail::CreateInfo {
-		auto char_set = std::string_view{m_config.char_set.value};
-		if (char_set.empty()) {
-			log.warn("invalid (empty) {}", m_config.char_set.get_key());
-			char_set = defaults::char_set_v;
-		}
-
-		auto tile_height = m_config.tile_height.value;
-		if (tile_height <= 0.0f) {
-			log.warn("invalid {}: '{}'", m_config.tile_height.get_key(), m_config.tile_height.value);
-			tile_height = defaults::tile_height_v;
-		}
-
-		auto trail_tint = kvf::util::color_from_hex(m_config.trail_tint.value);
-		if (trail_tint.w < 255) {
-			log.warn("invalid {}: '{}", m_config.trail_tint.get_key(), m_config.trail_tint.value);
-			trail_tint = kvf::util::color_from_hex(defaults::trail_tint_v);
-		}
-
 		return detail::Trail::CreateInfo{
-			.char_set = char_set,
-			.tile_height = tile_height,
-			.trail_tint = trail_tint,
+			.char_set = m_config.char_set.value,
+			.tile_height = m_config.tile_height,
+			.trail_tint = m_post_config.trail_tint,
 		};
 	}
 
 	[[nodiscard]] auto get_rain_ci() const -> detail::Rain::CreateInfo {
-		auto max_trail_count = m_config.max_trails.value;
-		if (max_trail_count <= 0 || max_trail_count > 10000) {
-			log.warn("invalid {}: '{}'", m_config.max_trails.get_key(), m_config.max_trails.value);
-			max_trail_count = defaults::max_trails_v;
-		}
-
-		auto density = m_config.density.value;
-		if (density <= 0.0f || density > 10.0f) {
-			log.warn("invalid {}: '{}'", m_config.density.get_key(), m_config.density.value);
-			density = defaults::density_v;
-		}
-
-		auto max_depth = m_config.max_depth.value;
-		if (max_depth < 1.0f || max_depth > 10.0f) {
-			log.warn("invalid {}: '{}'", m_config.max_depth.get_key(), m_config.max_depth.value);
-			max_depth = defaults::max_depth_v;
-		}
-
-		auto speed = m_config.speed.value;
-		if (speed < 0.1f || speed > 10.0f) {
-			log.warn("invalid {}: '{}'", m_config.speed.get_key(), m_config.speed.value);
-			speed = defaults::speed_v;
-		}
-
 		return detail::Rain::CreateInfo{
 			.world_size = m_context->framebuffer_size(),
 			.trail_ci = get_trail_ci(),
-			.max_trail_count = max_trail_count,
-			.density = density,
-			.max_depth = max_depth,
-			.speed = speed,
+			.max_trail_count = m_config.max_trails,
+			.density = m_config.density,
+			.max_depth = m_config.max_depth,
+			.speed = m_config.speed,
 		};
 	}
 
-	void load_config(std::string const& path) {
-		if (path.empty()) { return; }
+	auto try_load_config(klib::CString path) -> bool {
+		if (!m_config.load_from(path)) { return false; }
+		log.info("Config loaded from '{}'", path);
+		return true;
+	}
 
-		if (m_config.load_from(path)) {
-			log.info("Config loaded from '{}'", path);
-		} else {
+	void load_config(std::string const& path) {
+		if (path.empty()) {
+			try_load_config(defaults::config_path);
+		} else if (!try_load_config(path)) {
 			log.warn("failed to load Config from '{}'", path);
 		}
+		m_post_config = detail::Config::Post::process(m_config);
 	}
 
 	void load_font_bytes() {
@@ -600,6 +634,7 @@ class App {
 	}
 
 	detail::Config m_config{};
+	detail::Config::Post m_post_config{};
 
 	std::unique_ptr<le::Context> m_context{};
 
