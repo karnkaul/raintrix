@@ -1,0 +1,54 @@
+#pragma once
+#include "detail/char_set.hpp"
+#include "detail/column.hpp"
+#include "kvf/time.hpp"
+#include "le2d/random.hpp"
+
+namespace raintrix::detail {
+struct TrailCreateInfo {
+	std::string_view char_set{default_char_set_v};
+	kvf::Color trail_tint{kvf::green_v};
+	float tile_height{20.0f};
+};
+
+class Trail : public le::IDrawable {
+  public:
+	using CreateInfo = TrailCreateInfo;
+
+	enum class Status : std::int8_t { Running, Completed };
+
+	explicit Trail(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info);
+
+	void draw(le::IRenderer& renderer) const final { m_column.draw(renderer); }
+
+	void tick(kvf::Seconds dt);
+
+	void randomize_cells(int count);
+	void start_fall(float speed, kvf::Seconds ttl);
+
+	[[nodiscard]] auto get_status() const -> Status;
+
+	le::Transform transform{};
+	kvf::Seconds fade_rate{1s};
+
+  private:
+	void tick_head(kvf::Seconds dt);
+	void tick_tail(kvf::Seconds dt);
+	void deactivate();
+
+	gsl::not_null<le::Random*> m_random;
+	gsl::not_null<le::IFont*> m_font;
+	CreateInfo m_info{};
+
+	Column m_column{};
+	std::string m_text_buffer{};
+
+	kvf::Seconds m_advance_rate{};
+	kvf::Seconds m_ttl{};
+
+	kvf::Seconds m_advance_elapsed{};
+	kvf::Seconds m_ttl_elapsed{};
+	int m_head_index{};
+	bool m_active{};
+};
+} // namespace raintrix::detail

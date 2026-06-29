@@ -2,23 +2,26 @@
 #include "cfg/io.hpp"
 #include "cfg/variable.hpp"
 #include "detail/config.hpp"
-#include "detail/tile_column.hpp"
+#include "detail/rain.hpp"
 #include "klib/file_io.hpp"
 #include "klib/log/tagged.hpp"
-#include "klib/random.hpp"
 #include "le2d/context.hpp"
+#include "le2d/random.hpp"
 #include "le2d/shape/quad.hpp"
 #include "raintrix/build_version.hpp"
 #include "raintrix/panic.hpp"
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <optional>
 
 namespace raintrix {
 
 #pragma region common
 
 namespace {
+auto const log = klib::log::Tagged{"raintrix"};
+
 auto to_lower(std::string_view const input) -> std::string {
 	auto ret = std::string{};
 	ret.reserve(input.size());
@@ -149,18 +152,17 @@ auto Config::save_to(klib::CString const path) const -> bool {
 
 #pragma endregion
 
-#pragma region tile_column
+#pragma region column
 
 namespace detail {
-void TileColumn::setup_tiles(le::IFontAtlas const& font_atlas, std::string_view const text, float const tile_height) {
+void Column::setup_tiles(le::IFontAtlas const& font_atlas, std::string_view const text, float const tile_height) {
 	m_tiles.clear();
 	if (text.empty()) { return; }
 
 	auto glyph_layouts = std::vector<kvf::ttf::GlyphLayout>{};
 	font_atlas.push_layouts(glyph_layouts, text);
 
-	auto const height = tile_height * float(text.size());
-	auto y_offset = 0.5f * (height - tile_height);
+	auto y_offset = 0.0f;
 
 	m_tiles.reserve(le::shape::Quad::vertex_count_v * glyph_layouts.size(), le::shape::Quad::indices_v.size() * glyph_layouts.size());
 	for (auto const& glyph_layout : glyph_layouts) {
@@ -174,7 +176,13 @@ void TileColumn::setup_tiles(le::IFontAtlas const& font_atlas, std::string_view 
 	m_atlas = &font_atlas.get_texture();
 }
 
-void TileColumn::draw(le::IRenderer& renderer) const {
+auto Column::quad_count() const -> std::size_t { return m_tiles.vertices.size() / le::shape::Quad::vertex_count_v; }
+
+auto Column::quad_at(std::size_t const index) -> QuadViewMut { return get_quad_at<QuadViewMut>(index); }
+
+auto Column::quad_at(std::size_t const index) const -> QuadView { return get_quad_at<QuadView>(index); }
+
+void Column::draw(le::IRenderer& renderer) const {
 	if (!m_atlas) { return; }
 
 	auto const primitive = le::Primitive{
@@ -182,11 +190,175 @@ void TileColumn::draw(le::IRenderer& renderer) const {
 		.indices = m_tiles.indices,
 		.texture = m_atlas,
 	};
-	auto render_instance = le::RenderInstance{};
-	render_instance.transform.position.x = x_offset;
+	auto const render_instance = le::RenderInstance{
+		.transform = transform,
+		.tint = tint,
+	};
 	renderer.draw(primitive, {&render_instance, 1});
 }
 
+template <typename T, typename Self>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+auto Column::get_quad_at(this Self&& self, std::size_t index) -> T {
+	auto const vertex_index = index * le::shape::Quad::vertex_count_v;
+	if (vertex_index + le::shape::Quad::vertex_count_v > self.m_tiles.vertices.size()) { return {}; }
+	return T{.vertices = std::span{self.m_tiles.vertices}.subspan(vertex_index, le::shape::Quad::vertex_count_v)};
+}
+} // namespace detail
+
+#pragma endregion
+
+#pragma region trail
+
+namespace detail {
+Trail::Trail(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
+	: m_random(random_engine), m_font(font), m_info(create_info) {}
+
+void Trail::tick(kvf::Seconds const dt) {
+	if (m_active) { tick_head(dt); }
+	tick_tail(dt);
+	if (m_active) {
+		m_ttl_elapsed += dt;
+		if (m_ttl_elapsed >= m_ttl) { deactivate(); }
+	}
+	m_column.transform = transform;
+}
+
+void Trail::randomize_cells(int const count) {
+	m_text_buffer.clear();
+	m_text_buffer.reserve(std::size_t(count));
+	for (int i = 0; i < count; ++i) {
+		auto const index = m_random->next_index(m_info.char_set.size());
+		auto const c = m_info.char_set.at(index);
+		m_text_buffer.push_back(c);
+	}
+
+	auto const text_height = le::TextHeight(m_info.tile_height);
+	m_column.setup_tiles(m_font->get_atlas(text_height), m_text_buffer, m_info.tile_height);
+}
+
+void Trail::start_fall(float const speed, kvf::Seconds const ttl) {
+	m_advance_rate = kvf::Seconds{1.0f / speed};
+	m_ttl = ttl;
+	m_advance_elapsed = m_ttl_elapsed = 0s;
+	m_head_index = 0;
+	m_active = true;
+
+	auto const quad_count = m_column.quad_count();
+	for (auto i = 0uz; i < quad_count; ++i) {
+		auto quad = m_column.quad_at(i);
+		quad.set_color(m_info.trail_tint);
+		quad.set_alpha(0.0f);
+	}
+	auto head = m_column.quad_at(0);
+	head.set_color(kvf::white_v);
+	head.set_alpha(1.0f);
+}
+
+auto Trail::get_status() const -> Status {
+	if (m_active) { return Status::Running; }
+
+	if (m_head_index == 0) { return Status::Completed; }
+	auto const pre_head = m_column.quad_at(std::size_t(m_head_index - 1));
+	if (pre_head.get_alpha() <= 0.0f) { return Status::Completed; }
+
+	return Status::Running;
+}
+
+void Trail::tick_head(kvf::Seconds const dt) {
+	m_advance_elapsed += dt;
+	if (m_advance_elapsed < m_advance_rate) { return; }
+
+	m_advance_elapsed = 0s;
+
+	auto const quad_count = int(m_column.quad_count());
+	KLIB_ASSERT(m_head_index >= 0 && m_head_index < quad_count);
+	auto head = m_column.quad_at(std::size_t(m_head_index));
+	head.set_color(m_info.trail_tint);
+	head.set_alpha(0.8f);
+
+	++m_head_index;
+	if (m_head_index >= quad_count) {
+		head.set_color(m_info.trail_tint);
+		m_active = false;
+		return;
+	}
+
+	head = m_column.quad_at(std::size_t(m_head_index));
+	head.set_color(kvf::white_v);
+	head.set_alpha(1.0f);
+}
+
+void Trail::tick_tail(kvf::Seconds const dt) {
+	if (m_head_index == 0) { return; }
+
+	auto const d_alpha = fade_rate.count() * dt.count();
+
+	if (d_alpha <= 0.0f || d_alpha >= 1.0f) { return; }
+
+	for (int index = m_head_index - 1; index >= 0; --index) {
+		auto quad = m_column.quad_at(std::size_t(index));
+		auto const alpha = std::max(0.0f, quad.get_alpha() - d_alpha);
+		quad.set_alpha(alpha);
+	}
+}
+
+void Trail::deactivate() {
+	auto const quad_count = int(m_column.quad_count());
+	KLIB_ASSERT(m_head_index >= 0 && m_head_index < quad_count);
+	auto head = m_column.quad_at(std::size_t(m_head_index));
+	head.set_alpha(0.0f);
+	m_active = false;
+}
+} // namespace detail
+
+#pragma endregion
+
+#pragma region rain
+
+namespace detail {
+Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
+	: m_random(random_engine), m_font(font), m_info(create_info) {}
+
+void Rain::draw(le::IRenderer& renderer) const {
+	for (auto const& trail : m_trails) { trail.draw(renderer); }
+}
+
+void Rain::tick(kvf::Seconds const dt) {
+	m_spawn_remain -= dt;
+	if (m_spawn_remain <= 0s) {
+		m_spawn_remain = m_info.trail_spawn_rate;
+		spawn_trail();
+	}
+
+	for (auto& trail : m_trails) { trail.tick(dt); }
+}
+
+auto Rain::get_fresh_trail() -> klib::Ptr<Trail> {
+	for (auto& trail : m_trails) {
+		if (trail.get_status() == Trail::Status::Completed) { return &trail; }
+	}
+
+	if (int(m_trails.size()) >= m_info.max_trail_count) { return nullptr; }
+
+	m_trails.emplace_back(m_random, m_font, m_info.trail_ci);
+	auto& ret = m_trails.back();
+	ret.randomize_cells(m_info.cell_count);
+	return &ret;
+}
+
+void Rain::spawn_trail() {
+	auto trail = get_fresh_trail();
+	if (!trail) { return; }
+
+	auto const half_width = 0.5f * m_info.world_width;
+	trail->transform.position.x = m_random->next_float(-half_width, half_width);
+	trail->transform.scale = glm::vec2{m_random->next_float(0.25f, 1.0f)};
+
+	auto const speed = m_random->next_float(10.0f, 20.0f);
+	auto const ttl = kvf::Seconds{m_random->next_float(2.0f, 5.0f)};
+	trail->start_fall(speed, ttl);
+}
 } // namespace detail
 
 #pragma endregion
@@ -197,13 +369,13 @@ namespace {
 class App {
   public:
 	void run(std::string const& config_path) {
-		m_log.info("raintrix {}", build_version_v);
+		log.info("raintrix {}", build_version_v);
 
 		load_config(config_path);
 		load_font_bytes();
 		create_context();
 		create_font();
-		create_columns();
+		create_rain();
 
 		run_loop();
 	}
@@ -213,16 +385,16 @@ class App {
 		if (path.empty()) { return; }
 
 		if (m_config.load_from(path)) {
-			m_log.info("Config loaded from '{}'", path);
+			log.info("Config loaded from '{}'", path);
 		} else {
-			m_log.warn("failed to load Config from '{}'", path);
+			log.warn("failed to load Config from '{}'", path);
 		}
 	}
 
 	void load_font_bytes() {
 		auto const font_path = klib::CString{m_config.font_path.value};
 		if (!klib::read_file_bytes_into(m_font_bytes, font_path)) { throw Panic{std::format("Failed to load font: '{}'", font_path)}; }
-		m_log.info("font bytes loaded from '{}'", font_path);
+		log.info("font bytes loaded from '{}'", font_path);
 	}
 
 	void create_context() {
@@ -245,43 +417,31 @@ class App {
 		if (!m_font->load_face(std::move(m_font_bytes))) { throw Panic{std::format("Failed to load font: '{}'", m_config.font_path.value)}; }
 	}
 
-	void create_columns() {
+	void create_rain() {
 		auto const fb_extent = m_context->get_render_device().get_framebuffer_extent();
 		glm::vec2 const fb_size = glm::ivec2{fb_extent.width, fb_extent.height};
 
-		auto const row_count = (int(fb_size.y) / int(m_config.tile_height.value)) + 1;
 		auto const column_count = (int(fb_size.x) / int(m_config.tile_height.value)) + 1;
 
-		auto x_offset = -0.5f * (fb_size.x + m_config.tile_height);
-		for (int i = 0; i < column_count; ++i) {
-			m_columns.push_back(create_column(row_count, x_offset));
-			x_offset += m_config.tile_height;
-		}
-	}
-
-	[[nodiscard]] auto create_column(int const char_count, float const x_offset) -> detail::TileColumn {
-		auto ret = detail::TileColumn{};
-
-		auto text = std::string{};
-		text.reserve(std::size_t(char_count));
-		for (int i = 0; i < char_count; ++i) {
-			auto const index = klib::random_index(m_random_engine, m_config.char_set.value.size());
-			auto const c = m_config.char_set.value.at(index);
-			text.push_back(c);
-		}
-
-		auto const text_height = le::TextHeight(m_config.tile_height.value);
-		ret.setup_tiles(m_font->get_atlas(text_height), text, m_config.tile_height);
-		ret.x_offset = x_offset;
-
-		return ret;
+		auto const trail_ci = detail::Trail::CreateInfo{
+			.char_set = m_config.char_set.value,
+			.tile_height = m_config.tile_height,
+		};
+		auto const rain_ci = detail::Rain::CreateInfo{
+			.world_width = fb_size.x,
+			.cell_count = column_count,
+			.trail_ci = trail_ci,
+		};
+		m_rain.emplace(&m_random_engine, m_font.get(), rain_ci);
 	}
 
 	void run_loop() {
+		// m_rain->initialize();
+
 		while (m_context->is_running()) {
 			m_context->next_frame();
 
-			tick(m_context->get_frame_stats().frame_dt);
+			m_rain->tick(m_context->get_frame_stats().frame_dt);
 
 			auto& renderer = m_context->begin_render();
 			render(renderer);
@@ -290,13 +450,10 @@ class App {
 		}
 	}
 
-	void tick(kvf::Seconds const dt) {}
-
 	void render(le::IRenderer& renderer) const {
-		for (auto const& column : m_columns) { column.draw(renderer); }
+		renderer.view.position.y = -0.5f * float(renderer.framebuffer_size().y);
+		m_rain->draw(renderer);
 	}
-
-	klib::log::Tagged m_log{"raintrix"};
 
 	detail::Config m_config{};
 
@@ -305,9 +462,9 @@ class App {
 	std::vector<std::byte> m_font_bytes{};
 	std::unique_ptr<le::IFont> m_font{};
 
-	std::default_random_engine m_random_engine{std::random_device{}()};
+	le::Random m_random_engine{};
 
-	std::vector<detail::TileColumn> m_columns{};
+	std::optional<detail::Rain> m_rain{};
 
 	le::Context::Waiter m_waiter{};
 };

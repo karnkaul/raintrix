@@ -13,4 +13,6 @@ compile_commands.json
 Doxyfile
 /docs
 
-raintrix.cfg
+imgui.ini
+raintrix.conf
+notes.txt
