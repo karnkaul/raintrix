@@ -15,6 +15,7 @@
 #include "le2d/random.hpp"
 #include "le2d/shape/quad.hpp"
 #include "raintrix/build_version.hpp"
+#include "raintrix/limits.hpp"
 #include "raintrix/panic.hpp"
 #include <imgui.h>
 #include <algorithm>
@@ -214,13 +215,13 @@ auto Config::Post::process(Config& out) -> Config::Post {
 		}
 
 		auto const windowed = to_windowed(resolution);
-		if (!windowed) { return false; }
+		if (!windowed || !kvf::is_positive(windowed->size)) { return false; }
 
 		ret.resolution = *windowed;
 		return true;
 	});
 
-	ensure_valid(out.tile_height, defaults::tile_height_v, [](float const f) { return f > 0.0f && f < 100.0f; });
+	ensure_valid(out.tile_height, defaults::tile_height_v, limits::tile_height_v);
 	ensure_valid(out.char_set, defaults::char_set_v, [](std::string_view const in) { return !in.empty(); });
 	check_valid(out.trail_tint, [&ret](std::string_view const hex) {
 		auto tint = kvf::util::color_from_hex(hex);
@@ -229,10 +230,10 @@ auto Config::Post::process(Config& out) -> Config::Post {
 		return true;
 	});
 
-	ensure_valid(out.max_trails, defaults::max_trails_v, [](int const i) { return i > 0 && i <= 10000; });
-	ensure_valid(out.density, defaults::density_v, [](float const f) { return f > 0.0f && f < 10.0f; });
-	ensure_valid(out.max_depth, defaults::max_depth_v, [](float const f) { return f >= 1.0f && f <= 10.0f; });
-	ensure_valid(out.speed, defaults::speed_v, [](float const f) { return f >= 0.1f && f <= 10.0f; });
+	ensure_valid(out.max_trails, defaults::max_trails_v, limits::max_trails_v);
+	ensure_valid(out.density, defaults::density_v, limits::density_v);
+	ensure_valid(out.max_depth, defaults::max_depth_v, limits::max_depth_v);
+	ensure_valid(out.speed, defaults::speed_v, limits::speed_v);
 
 	return ret;
 }
@@ -301,7 +302,7 @@ auto Column::get_quad_at(this Self&& self, std::size_t index) -> T {
 namespace detail {
 Trail::Trail(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
-	KLIB_ASSERT(m_info.tile_height > 0.0f && m_info.tile_height <= 100.0f);
+	KLIB_ASSERT(limits::tile_height_v.in_range(m_info.tile_height));
 	KLIB_ASSERT(m_info.trail_tint.w == 255);
 }
 
@@ -412,10 +413,10 @@ namespace detail {
 Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> font, CreateInfo const& create_info)
 	: m_random(random_engine), m_font(font), m_info(create_info) {
 	KLIB_ASSERT(kvf::is_positive(m_info.world_size));
-	KLIB_ASSERT(m_info.max_trail_count > 0 && m_info.max_trail_count <= 10000);
-	KLIB_ASSERT(m_info.max_depth >= 1.0f && m_info.max_depth <= 10.0f);
-	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
-	KLIB_ASSERT(m_info.density > 0.0f && m_info.density <= 10.0f);
+	KLIB_ASSERT(limits::max_trails_v.in_range(m_info.max_trail_count));
+	KLIB_ASSERT(limits::max_depth_v.in_range(m_info.max_depth));
+	KLIB_ASSERT(limits::speed_v.in_range(m_info.speed));
+	KLIB_ASSERT(limits::density_v.in_range(m_info.density));
 
 	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 500.0f};
