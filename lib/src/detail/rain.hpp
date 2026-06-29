@@ -9,7 +9,7 @@ struct RainCreateInfo {
 	int max_trail_count{defaults::max_trails_v}; // must be > 0 and <= 10000
 	float density{defaults::density_v};			 // must be > 0 and <= 10
 	float max_depth{defaults::max_depth_v};		 // must be >= 1 and <= 10
-	float speed{defaults::speed_v};				 // must be > 0.1 and <= 10
+	float speed{defaults::speed_v};				 // must be >= 0.1 and <= 10
 };
 
 class Rain : public le::IDrawable {
@@ -33,6 +33,7 @@ class Rain : public le::IDrawable {
 	int m_cell_count{};
 	kvf::Seconds m_spawn_rate{};
 	kvf::Seconds m_base_ttl{};
+	kvf::Seconds m_base_fade_rate{};
 
 	std::vector<Trail> m_trails{};
 

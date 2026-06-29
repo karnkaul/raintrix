@@ -141,12 +141,17 @@ namespace detail {
 auto Config::load_from(klib::CString const path) -> bool {
 	auto reader = cfg::Reader{};
 
+	reader.track_variable(resolution);
+
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
 	reader.track_variable(char_set);
-	reader.track_variable(resolution);
-	reader.track_variable(max_trails);
 	reader.track_variable(trail_tint);
+
+	reader.track_variable(max_trails);
+	reader.track_variable(density);
+	reader.track_variable(max_depth);
+	reader.track_variable(speed);
 
 	return reader.parse_file(path);
 }
@@ -318,7 +323,7 @@ void Trail::tick_head(kvf::Seconds const dt) {
 void Trail::tick_tail(kvf::Seconds const dt) {
 	if (m_head_index == 0) { return; }
 
-	auto const d_alpha = fade_rate.count() * dt.count();
+	auto const d_alpha = dt / fade_rate;
 
 	if (d_alpha <= 0.0f || d_alpha >= 1.0f) { return; }
 
@@ -351,8 +356,9 @@ Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> f
 	KLIB_ASSERT(m_info.speed >= 0.1f && m_info.speed <= 10.0f);
 	KLIB_ASSERT(m_info.density > 0.0f && m_info.density <= 10.0f);
 
-	m_spawn_rate = kvf::Seconds{1.0f / (m_info.density * m_info.world_size.x)};
-	m_base_ttl = kvf::Seconds{m_info.world_size.y / 200.0f};
+	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
+	m_base_ttl = kvf::Seconds{m_info.world_size.y / 500.0f};
+	m_base_fade_rate = kvf::Seconds{m_info.world_size.y / 500.0f};
 	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
 }
 
@@ -397,7 +403,8 @@ void Rain::spawn_trail() {
 	}
 
 	auto const speed = m_info.speed * m_random->next_float(10.0f, 20.0f);
-	auto const ttl = m_base_ttl * (m_random->next_float(1.0f, 3.0f) / m_info.speed);
+	auto const ttl = m_base_ttl * (m_random->next_float(0.8f, 1.6f) / m_info.speed);
+	trail->fade_rate = m_base_fade_rate * (m_random->next_float(0.8f, 1.6f));
 	trail->start_fall(speed, ttl);
 }
 } // namespace detail
@@ -498,7 +505,7 @@ class App {
 		}
 
 		auto speed = m_config.speed.value;
-		if (speed <= 0.1f || speed > 10.0f) {
+		if (speed < 0.1f || speed > 10.0f) {
 			log.warn("invalid {}: '{}'", m_config.speed.get_key(), m_config.speed.value);
 			speed = defaults::speed_v;
 		}
