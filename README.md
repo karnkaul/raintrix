@@ -13,6 +13,10 @@ https://github.com/user-attachments/assets/0c12ca45-4e63-473c-9ad0-8729425c21d8
 - (Windows) Latest C++ Runtime
 - (Linux) libc, libm, libgcc
 
+## Attribution
+
+- [Sketch font](https://www.fontspace.com/sketch-font-f26335) (embedded into binary)
+
 ## Contributing
 
 Pull/merge requests are welcome.

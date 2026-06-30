@@ -6,9 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: init
-        run: |
-            sudo update-alternatives --remove-all clang-format
-            sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-22 10
+        run: .github/ubuntu/init.sh
       - name: format code
         run: scripts/format_code.sh
       - name: check diff
@@ -18,12 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: init
-        run: |
-            uname -m
-            sudo apt update -yqq
-            sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
-            sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 10
-            sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 10
+        run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=ninja-gcc -B build -DKVF_USE_FREETYPE=OFF
       - name: build debug
@@ -39,13 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: init
-        run: |
-            uname -m
-            sudo apt update -yqq
-            sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
-            sudo update-alternatives --remove-all clang++
-            sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 10
-            sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 10
+        run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=ninja-clang -B build -DKVF_USE_FREETYPE=OFF
       - name: build debug
@@ -61,12 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: init
-        run: |
-            uname -m
-            sudo apt update -yqq
-            sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
-            sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 10
-            sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 10
+        run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=ninja-gcc -B build -DKVF_USE_FREETYPE=OFF
       - name: build debug
@@ -82,13 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: init
-        run: |
-            uname -m
-            sudo apt update -yqq
-            sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
-            sudo update-alternatives --remove-all clang++
-            sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 10
-            sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 10
+        run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=ninja-clang -B build -DKVF_USE_FREETYPE=OFF
       - name: build debug

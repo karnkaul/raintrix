@@ -8,13 +8,9 @@ jobs:
   x64-linux-gcc:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: init
-        run: |
-            uname -m
-            sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
-            sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 10
-            sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 10
+        run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=ninja-gcc -B build
       - name: build release
@@ -33,13 +29,9 @@ jobs:
   arm64-linux-gcc:
     runs-on: ubuntu-26.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: init
-        run: |
-            uname -m
-            sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
-            sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 10
-            sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 10
+        run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=ninja-gcc -B build
       - name: build release
@@ -58,7 +50,7 @@ jobs:
   x64-windows-clang:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: configure
         run: cmake -S . --preset=ninja-clang -B build
       - name: build release
