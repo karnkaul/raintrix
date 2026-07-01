@@ -8,16 +8,20 @@ jobs:
   build_and_publish:
     strategy:
       matrix:
+        platform: [x64-linux, arm64-linux, x64-windows]
         include:
-          - os: ubuntu-26.04
+          - platform: x64-linux
+            os: ubuntu-26.04
             preset: ninja-gcc
             exe: raintrix
             archive: x64-linux-raintrix-${{ github.ref_name }}.tar.xz
-          - os: ubuntu-26.04-arm
+          - platform: arm64-linux
+            os: ubuntu-26.04-arm
             preset: ninja-gcc
             exe: raintrix
             archive: arm64-linux-raintrix-${{ github.ref_name }}.tar.xz
-          - os: windows-latest
+          - platform: x64-windows
+            os: windows-latest
             preset: ninja-clang
             exe: raintrix.exe
             archive: x64-windows-raintrix-${{ github.ref_name }}.zip
