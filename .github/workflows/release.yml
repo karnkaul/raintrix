@@ -5,7 +5,7 @@ on:
       'v*'
   workflow_dispatch:
 jobs:
-  build_and_publish:
+  build-and-publish:
     strategy:
       matrix:
         platform: [x64-linux, arm64-linux, x64-windows]
