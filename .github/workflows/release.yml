@@ -24,8 +24,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - if: ${{ matrix.os != 'windows-latest' }}
-        run: .github/ubuntu/init.sh
+      - name: init
+        run: cmake -P .github/init.cmake
       - name: configure
         run: cmake -S . --preset=${{ matrix.preset }} -B build
       - name: build release

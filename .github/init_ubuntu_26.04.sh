@@ -1,9 +1,15 @@
 #!/bin/bash
 
-uname -m
+skip_install=false
+if [[ "$1" == "--skip-install" ]]; then
+  echo "1: $1"
+  skip_install=true
+fi
 
-sudo apt update -yqq
-sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
+if [[ $skip_install == false ]]; then
+  sudo apt update -yqq
+  sudo apt install -yqq mesa-common-dev libwayland-dev libxkbcommon-dev wayland-protocols extra-cmake-modules xorg-dev
+fi
 
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 10
 sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 10
