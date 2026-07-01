@@ -22,10 +22,6 @@ jobs:
           - os: ubuntu-26.04-arm
             preset: vs26
         include:
-          - os: ubuntu-26.04
-            use_init: true
-          - os: ubuntu-26.04-arm
-            use_init: true
           - preset: vs26
             build_args: --parallel
           - preset: ninja-gcc
@@ -35,7 +31,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - if: ${{ matrix.use_init }}
+      - if: ${{ matrix.os != 'windows-latest' }}
         run: .github/ubuntu/init.sh
       - name: configure
         run: cmake -S . --preset=${{ matrix.preset }} -B build -DKVF_USE_FREETYPE=OFF
