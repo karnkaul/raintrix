@@ -195,6 +195,7 @@ auto Config::load_from(klib::CString const path) -> bool {
 	auto reader = cfg::Reader{};
 
 	reader.track_variable(resolution);
+	reader.track_variable(exit_on_escape);
 
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
@@ -216,6 +217,7 @@ auto Config::save_to(klib::CString const path) const -> bool {
 
 	writer.write_header("Window");
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
+	writer.write_variable(exit_on_escape, "exit on Escape (boolean)");
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
@@ -605,9 +607,11 @@ class App {
 	}
 
 	void bind_actions() {
-		m_action_mapping.bind_action(&m_exit, [this](le::input::action::Value const& v) {
-			if (v.get<bool>()) { m_context->set_window_close(); }
-		});
+		if (m_config.exit_on_escape) {
+			m_action_mapping.bind_action(&m_exit, [this](le::input::action::Value const& v) {
+				if (v.get<bool>()) { m_context->set_window_close(); }
+			});
+		}
 
 		m_input_router.push_mapping(&m_action_mapping);
 	}

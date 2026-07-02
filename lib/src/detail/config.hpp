@@ -21,6 +21,7 @@ struct Config {
 
 	// Window.
 	cfg::Variable<std::string> resolution{"RESOLUTION", std::string{defaults::resolution_v}};
+	cfg::Variable<bool> exit_on_escape{"EXIT_ON_ESCAPE", true};
 
 	// Trails.
 	cfg::Variable<std::string> font_path{"FONT_PATH"};
