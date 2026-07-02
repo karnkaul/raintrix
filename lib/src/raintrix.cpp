@@ -6,6 +6,7 @@
 #include "detail/rain.hpp"
 #include "klib/file_io.hpp"
 #include "klib/log/tagged.hpp"
+#include "klib/string/fixed_string.hpp"
 #include "klib/visitor.hpp"
 #include "kvf/util.hpp"
 #include "le2d/context.hpp"
@@ -91,24 +92,24 @@ auto Reader::parse_file(klib::CString const path) -> bool {
 	return true;
 }
 
-void Writer::write_header(std::string_view const text) {
+void Writer::write_header(std::string_view const in) {
 	static constexpr auto hashes_v = std::string_view{"################\n"};
-	if (!m_text.empty()) { m_text.push_back('\n'); }
-	m_text.append(hashes_v);
-	if (!text.empty()) { std::format_to(std::back_inserter(m_text), "### {}\n{}", text, hashes_v); }
+	if (!text.empty()) { text.push_back('\n'); }
+	text.append(hashes_v);
+	if (!in.empty()) { std::format_to(std::back_inserter(text), "### {}\n{}", in, hashes_v); }
 }
 
 void Writer::write_variable(IVariable const& variable, std::string_view const description, WriteStatus const status) {
-	if (!m_text.empty()) { m_text.push_back('\n'); }
-	if (!description.empty()) { std::format_to(std::back_inserter(m_text), "## {}\n", description); }
-	if (status == WriteStatus::Commented) { m_text.append("# "); }
-	std::format_to(std::back_inserter(m_text), "{} = {}\n", variable.get_key(), variable.serialize_value());
+	if (!text.empty()) { text.push_back('\n'); }
+	if (!description.empty()) { std::format_to(std::back_inserter(text), "## {}\n", description); }
+	if (status == WriteStatus::Commented) { text.append("# "); }
+	std::format_to(std::back_inserter(text), "{} = {}\n", variable.get_key(), variable.serialize_value());
 }
 
 auto Writer::write_to(klib::CString const path) const -> bool {
 	auto file = std::ofstream{path.c_str()};
 	if (!file) { return false; }
-	file.write(m_text.c_str(), std::streamsize(m_text.size()));
+	file.write(text.c_str(), std::streamsize(text.size()));
 	return file.good();
 }
 } // namespace cfg
@@ -195,7 +196,8 @@ auto Config::load_from(klib::CString const path) -> bool {
 	auto reader = cfg::Reader{};
 
 	reader.track_variable(resolution);
-	reader.track_variable(exit_on_escape);
+	reader.track_variable(keybind_exit_escape);
+	reader.track_variable(keybind_stats_f1);
 
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
@@ -210,14 +212,13 @@ auto Config::load_from(klib::CString const path) -> bool {
 	return reader.parse_file(path);
 }
 
-auto Config::save_to(klib::CString const path) const -> bool {
-	if (path.as_view().empty()) { return false; }
-
+auto Config::to_string() const -> std::string {
 	auto writer = cfg::Writer{};
 
 	writer.write_header("Window");
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
-	writer.write_variable(exit_on_escape, "exit on Escape (boolean)");
+	writer.write_variable(keybind_exit_escape, "exit on Escape (boolean)");
+	writer.write_variable(keybind_stats_f1, "F1 to show Stats");
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
@@ -231,7 +232,7 @@ auto Config::save_to(klib::CString const path) const -> bool {
 	writer.write_variable(max_depth, std::format("trail max depth / z (affects average trail scale), {}", serialize(limits::max_depth_v)));
 	writer.write_variable(speed, std::format("fall speed factor (affects average speed and time to live) {}", serialize(limits::speed_v)));
 
-	return writer.write_to(path);
+	return std::move(writer.text);
 }
 
 auto Config::Post::process(Config& out) -> Config::Post {
@@ -475,10 +476,6 @@ void Rain::tick(kvf::Seconds const dt) {
 		return false;
 	};
 	std::erase_if(m_trails.active, tick_trail);
-
-	ImGui::Begin("Debug");
-	ImGui::TextUnformatted(std::format("trails: {}", m_trails.active.size()).c_str());
-	ImGui::End();
 }
 
 void Rain::create_trails() {
@@ -627,9 +624,14 @@ class App {
 	}
 
 	void bind_actions() {
-		if (m_config.exit_on_escape) {
-			m_action_mapping.bind_action(&m_exit, [this](le::input::action::Value const& v) {
+		if (m_config.keybind_exit_escape) {
+			m_action_mapping.bind_action(&m_actions.exit, [this](le::input::action::Value const& v) {
 				if (v.get<bool>()) { m_context->set_window_close(); }
+			});
+		}
+		if (m_config.keybind_stats_f1) {
+			m_action_mapping.bind_action(&m_actions.stats, [this](le::input::action::Value const& v) {
+				if (v.get<bool>()) { m_show_stats = true; }
 			});
 		}
 
@@ -642,15 +644,7 @@ class App {
 		while (m_context->is_running()) {
 			m_context->next_frame();
 
-			m_input_router.dispatch(m_context->event_queue());
-			m_rain->tick(m_context->get_frame_stats().frame_dt);
-
-			ImGui::Begin("Debug");
-			auto const& fs = m_context->get_frame_stats();
-			ImGui::TextUnformatted(std::format("fps: {}", fs.framerate).c_str());
-			ImGui::TextUnformatted(std::format("ft: {:.1f}ms", fs.frame_dt.count() * 1000.0f).c_str());
-			ImGui::TextUnformatted(std::format("dt: {:.1f}ms", fs.total_dt.count() * 1000.0f).c_str());
-			ImGui::End();
+			tick(m_context->get_frame_stats().frame_dt);
 
 			auto& renderer = m_context->begin_render();
 			render(renderer);
@@ -659,9 +653,34 @@ class App {
 		}
 	}
 
+	void tick(kvf::Seconds const dt) {
+		m_input_router.dispatch(m_context->event_queue());
+		m_rain->tick(dt);
+		draw_stats();
+	}
+
+	void draw_stats() {
+		if (!m_show_stats) { return; }
+
+		ImGui::SetNextWindowSize({150.0f, -1.0f}, ImGuiCond_Once);
+		ImGui::Begin("Stats", &m_show_stats);
+
+		auto const& fs = m_context->get_frame_stats();
+		ImGui::TextUnformatted(klib::FixedString{"FPS: {}", fs.framerate}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"vsync: {}", le::vsync_name_map.to_name(m_context->get_vsync())}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"uptime: {:.0f}s", fs.run_time.count()}.c_str());
+
+		ImGui::TextUnformatted(klib::FixedString{"draws: {}", m_render_stats.draw_calls}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"tris: {}", m_render_stats.triangles}.c_str());
+
+		ImGui::End();
+	}
+
 	void render(le::IRenderer& renderer) const {
 		renderer.view.position.y = -0.5f * float(renderer.framebuffer_size().y);
 		m_rain->draw(renderer);
+		m_render_stats = renderer.get_stats();
 	}
 
 	detail::Config m_config{};
@@ -676,9 +695,15 @@ class App {
 
 	le::input::Router m_input_router{};
 	le::input::ActionMapping m_action_mapping{};
-	le::input::action::KeyDigital m_exit{GLFW_KEY_ESCAPE};
+
+	struct {
+		le::input::action::KeyDigital exit{GLFW_KEY_ESCAPE};
+		le::input::action::KeyDigital stats{GLFW_KEY_F1};
+	} m_actions{};
 
 	std::optional<detail::Rain> m_rain{};
+	mutable le::RenderStats m_render_stats{};
+	bool m_show_stats{};
 
 	le::Context::Waiter m_waiter{};
 };
@@ -688,9 +713,9 @@ class App {
 
 } // namespace raintrix
 
-auto raintrix::generate_config(std::string const& path) -> bool {
-	auto const config = detail::Config{};
-	return config.save_to(path);
+auto raintrix::generate_config() -> std::string {
+	static auto const s_config = detail::Config{};
+	return s_config.to_string();
 }
 
 void raintrix::run_trix(std::string const& config_path) { App{}.run(config_path); }
