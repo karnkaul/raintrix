@@ -218,7 +218,7 @@ auto Config::to_string() const -> std::string {
 	writer.write_header("Window");
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
 	writer.write_variable(keybind_exit_escape, "exit on Escape (boolean)");
-	writer.write_variable(keybind_stats_f1, "F1 to show Stats");
+	writer.write_variable(keybind_stats_f1, "F1 to show Stats (boolean)");
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
@@ -446,13 +446,12 @@ Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> f
 	KLIB_ASSERT(limits::max_trails_v.in_range(m_info.max_trail_count));
 	KLIB_ASSERT(limits::max_depth_v.in_range(m_info.max_depth));
 	KLIB_ASSERT(limits::speed_v.in_range(m_info.speed));
-	KLIB_ASSERT(limits::density_v.in_range(m_info.density));
 
-	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
+	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 500.0f};
 	m_base_fade_rate = kvf::Seconds{m_info.world_size.y / 500.0f};
-	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
 
+	set_density(m_info.density);
 	create_trails();
 }
 
@@ -478,10 +477,17 @@ void Rain::tick(kvf::Seconds const dt) {
 	std::erase_if(m_trails.active, tick_trail);
 }
 
+void Rain::set_density(float const density) {
+	m_info.density = std::clamp(density, 0.1f, limits::density_v.hi);
+	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
+}
+
 void Rain::create_trails() {
-	m_trails.storage.reserve(std::size_t(m_info.max_trail_count));
-	m_trails.inactive.reserve(std::size_t(m_info.max_trail_count));
-	for (int i = 0; i < m_info.max_trail_count; ++i) {
+	auto const capacity = std::size_t(m_info.max_trail_count);
+	m_trails.storage.reserve(capacity);
+	m_trails.inactive.reserve(capacity);
+	m_trails.active.reserve(capacity);
+	for (auto i = 0uz; i < capacity; ++i) {
 		auto& trail = m_trails.storage.emplace_back(m_random, m_font, m_info.trail_ci);
 		trail.randomize_cells(m_cell_count);
 		m_trails.inactive.emplace_back(&trail);
@@ -662,7 +668,7 @@ class App {
 	void draw_stats() {
 		if (!m_show_stats) { return; }
 
-		ImGui::SetNextWindowSize({150.0f, -1.0f}, ImGuiCond_Once);
+		ImGui::SetNextWindowSize({180.0f, -1.0f}, ImGuiCond_Once);
 		ImGui::Begin("Stats", &m_show_stats);
 
 		auto const& fs = m_context->get_frame_stats();
@@ -673,6 +679,10 @@ class App {
 
 		ImGui::TextUnformatted(klib::FixedString{"draws: {}", m_render_stats.draw_calls}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"tris: {}", m_render_stats.triangles}.c_str());
+
+		auto density = m_rain->get_density();
+		ImGui::SetNextItemWidth(100.0f);
+		if (ImGui::DragFloat("density", &density, 0.25f, 0.25f, limits::density_v.hi, "%.2f")) { m_rain->set_density(density); }
 
 		ImGui::End();
 	}
