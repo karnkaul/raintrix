@@ -23,6 +23,8 @@ class Rain : public le::IDrawable {
 	void tick(kvf::Seconds dt);
 
   private:
+	void create_trails();
+
 	[[nodiscard]] auto next_inactive_trail() -> klib::Ptr<Trail>;
 
 	void spawn_trail();
@@ -35,7 +37,11 @@ class Rain : public le::IDrawable {
 	kvf::Seconds m_base_ttl{};
 	kvf::Seconds m_base_fade_rate{};
 
-	std::vector<Trail> m_trails{};
+	struct {
+		std::vector<Trail> storage{};
+		std::vector<gsl::not_null<Trail*>> inactive{};
+		std::vector<gsl::not_null<Trail*>> active{};
+	} m_trails{};
 
 	kvf::Seconds m_spawn_remain{};
 };

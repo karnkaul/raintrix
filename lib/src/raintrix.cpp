@@ -451,10 +451,12 @@ Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> f
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 500.0f};
 	m_base_fade_rate = kvf::Seconds{m_info.world_size.y / 500.0f};
 	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
+
+	create_trails();
 }
 
 void Rain::draw(le::IRenderer& renderer) const {
-	for (auto const& trail : m_trails) { trail.draw(renderer); }
+	for (auto const& trail : m_trails.active) { trail->draw(renderer); }
 }
 
 void Rain::tick(kvf::Seconds const dt) {
@@ -464,19 +466,37 @@ void Rain::tick(kvf::Seconds const dt) {
 		spawn_trail();
 	}
 
-	for (auto& trail : m_trails) { trail.tick(dt); }
+	auto const tick_trail = [&](gsl::not_null<Trail*> trail) {
+		trail->tick(dt);
+		if (trail->get_status() == Trail::Status::Completed) {
+			m_trails.inactive.push_back(trail);
+			return true;
+		}
+		return false;
+	};
+	std::erase_if(m_trails.active, tick_trail);
+
+	ImGui::Begin("Debug");
+	ImGui::TextUnformatted(std::format("trails: {}", m_trails.active.size()).c_str());
+	ImGui::End();
+}
+
+void Rain::create_trails() {
+	m_trails.storage.reserve(std::size_t(m_info.max_trail_count));
+	m_trails.inactive.reserve(std::size_t(m_info.max_trail_count));
+	for (int i = 0; i < m_info.max_trail_count; ++i) {
+		auto& trail = m_trails.storage.emplace_back(m_random, m_font, m_info.trail_ci);
+		trail.randomize_cells(m_cell_count);
+		m_trails.inactive.emplace_back(&trail);
+	}
 }
 
 auto Rain::next_inactive_trail() -> klib::Ptr<Trail> {
-	for (auto& trail : m_trails) {
-		if (trail.get_status() == Trail::Status::Completed) { return &trail; }
-	}
+	if (m_trails.inactive.empty()) { return nullptr; }
 
-	if (int(m_trails.size()) >= m_info.max_trail_count) { return nullptr; }
-
-	auto& ret = m_trails.emplace_back(m_random, m_font, m_info.trail_ci);
-	ret.randomize_cells(m_cell_count);
-	return &ret;
+	m_trails.active.push_back(m_trails.inactive.back());
+	m_trails.inactive.pop_back();
+	return m_trails.active.back();
 }
 
 void Rain::spawn_trail() {
@@ -624,6 +644,13 @@ class App {
 
 			m_input_router.dispatch(m_context->event_queue());
 			m_rain->tick(m_context->get_frame_stats().frame_dt);
+
+			ImGui::Begin("Debug");
+			auto const& fs = m_context->get_frame_stats();
+			ImGui::TextUnformatted(std::format("fps: {}", fs.framerate).c_str());
+			ImGui::TextUnformatted(std::format("ft: {:.1f}ms", fs.frame_dt.count() * 1000.0f).c_str());
+			ImGui::TextUnformatted(std::format("dt: {:.1f}ms", fs.total_dt.count() * 1000.0f).c_str());
+			ImGui::End();
 
 			auto& renderer = m_context->begin_render();
 			render(renderer);
