@@ -22,20 +22,34 @@ class Rain : public le::IDrawable {
 
 	void tick(kvf::Seconds dt);
 
+	[[nodiscard]] auto get_density() const -> float { return m_info.density; }
+	void set_density(float density);
+
   private:
+	void create_trails();
+
 	[[nodiscard]] auto next_inactive_trail() -> klib::Ptr<Trail>;
 
 	void spawn_trail();
 
+	// immutable
+
 	gsl::not_null<le::Random*> m_random;
 	gsl::not_null<le::IFont*> m_font;
-	CreateInfo m_info{};
+	CreateInfo m_info{}; // .density is varying
 	int m_cell_count{};
-	kvf::Seconds m_spawn_rate{};
 	kvf::Seconds m_base_ttl{};
 	kvf::Seconds m_base_fade_rate{};
 
-	std::vector<Trail> m_trails{};
+	// varying
+
+	kvf::Seconds m_spawn_rate{};
+
+	struct {
+		std::vector<Trail> storage{};
+		std::vector<gsl::not_null<Trail*>> inactive{};
+		std::vector<gsl::not_null<Trail*>> active{};
+	} m_trails{};
 
 	kvf::Seconds m_spawn_remain{};
 };

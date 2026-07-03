@@ -6,6 +6,7 @@
 #include "detail/rain.hpp"
 #include "klib/file_io.hpp"
 #include "klib/log/tagged.hpp"
+#include "klib/string/fixed_string.hpp"
 #include "klib/visitor.hpp"
 #include "kvf/util.hpp"
 #include "le2d/context.hpp"
@@ -91,24 +92,24 @@ auto Reader::parse_file(klib::CString const path) -> bool {
 	return true;
 }
 
-void Writer::write_header(std::string_view const text) {
+void Writer::write_header(std::string_view const in) {
 	static constexpr auto hashes_v = std::string_view{"################\n"};
-	if (!m_text.empty()) { m_text.push_back('\n'); }
-	m_text.append(hashes_v);
-	if (!text.empty()) { std::format_to(std::back_inserter(m_text), "### {}\n{}", text, hashes_v); }
+	if (!text.empty()) { text.push_back('\n'); }
+	text.append(hashes_v);
+	if (!in.empty()) { std::format_to(std::back_inserter(text), "### {}\n{}", in, hashes_v); }
 }
 
 void Writer::write_variable(IVariable const& variable, std::string_view const description, WriteStatus const status) {
-	if (!m_text.empty()) { m_text.push_back('\n'); }
-	if (!description.empty()) { std::format_to(std::back_inserter(m_text), "## {}\n", description); }
-	if (status == WriteStatus::Commented) { m_text.append("# "); }
-	std::format_to(std::back_inserter(m_text), "{} = {}\n", variable.get_key(), variable.serialize_value());
+	if (!text.empty()) { text.push_back('\n'); }
+	if (!description.empty()) { std::format_to(std::back_inserter(text), "## {}\n", description); }
+	if (status == WriteStatus::Commented) { text.append("# "); }
+	std::format_to(std::back_inserter(text), "{} = {}\n", variable.get_key(), variable.serialize_value());
 }
 
 auto Writer::write_to(klib::CString const path) const -> bool {
 	auto file = std::ofstream{path.c_str()};
 	if (!file) { return false; }
-	file.write(m_text.c_str(), std::streamsize(m_text.size()));
+	file.write(text.c_str(), std::streamsize(text.size()));
 	return file.good();
 }
 } // namespace cfg
@@ -195,6 +196,8 @@ auto Config::load_from(klib::CString const path) -> bool {
 	auto reader = cfg::Reader{};
 
 	reader.track_variable(resolution);
+	reader.track_variable(keybind_exit_escape);
+	reader.track_variable(keybind_stats_f1);
 
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
@@ -209,18 +212,18 @@ auto Config::load_from(klib::CString const path) -> bool {
 	return reader.parse_file(path);
 }
 
-auto Config::save_to(klib::CString const path) const -> bool {
-	if (path.as_view().empty()) { return false; }
-
+auto Config::to_string() const -> std::string {
 	auto writer = cfg::Writer{};
 
 	writer.write_header("Window");
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
+	writer.write_variable(keybind_exit_escape, "exit on Escape (boolean)");
+	writer.write_variable(keybind_stats_f1, "F1 to show Stats (boolean)");
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
 	writer.write_variable(tile_height, std::format("glyph tile height (== width) {}", serialize(limits::tile_height_v)));
-	writer.write_variable(char_set, "set to sample characters from (non-empty)");
+	writer.write_variable(char_set, "set to sample characters from (non-empty, ASCII-only)");
 	writer.write_variable(trail_tint, "tint (color) of trail in 4-channel hex form (#RRGGBBAA) (alpha must be ff)");
 
 	writer.write_header("Rain");
@@ -229,7 +232,7 @@ auto Config::save_to(klib::CString const path) const -> bool {
 	writer.write_variable(max_depth, std::format("trail max depth / z (affects average trail scale), {}", serialize(limits::max_depth_v)));
 	writer.write_variable(speed, std::format("fall speed factor (affects average speed and time to live) {}", serialize(limits::speed_v)));
 
-	return writer.write_to(path);
+	return std::move(writer.text);
 }
 
 auto Config::Post::process(Config& out) -> Config::Post {
@@ -443,16 +446,17 @@ Rain::Rain(gsl::not_null<le::Random*> random_engine, gsl::not_null<le::IFont*> f
 	KLIB_ASSERT(limits::max_trails_v.in_range(m_info.max_trail_count));
 	KLIB_ASSERT(limits::max_depth_v.in_range(m_info.max_depth));
 	KLIB_ASSERT(limits::speed_v.in_range(m_info.speed));
-	KLIB_ASSERT(limits::density_v.in_range(m_info.density));
 
-	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
+	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
 	m_base_ttl = kvf::Seconds{m_info.world_size.y / 500.0f};
 	m_base_fade_rate = kvf::Seconds{m_info.world_size.y / 500.0f};
-	m_cell_count = (int(m_info.world_size.x) / int(m_info.trail_ci.tile_height)) + 1;
+
+	set_density(m_info.density);
+	create_trails();
 }
 
 void Rain::draw(le::IRenderer& renderer) const {
-	for (auto const& trail : m_trails) { trail.draw(renderer); }
+	for (auto const& trail : m_trails.active) { trail->draw(renderer); }
 }
 
 void Rain::tick(kvf::Seconds const dt) {
@@ -462,19 +466,40 @@ void Rain::tick(kvf::Seconds const dt) {
 		spawn_trail();
 	}
 
-	for (auto& trail : m_trails) { trail.tick(dt); }
+	auto const tick_trail = [&](gsl::not_null<Trail*> trail) {
+		trail->tick(dt);
+		if (trail->get_status() == Trail::Status::Completed) {
+			m_trails.inactive.push_back(trail);
+			return true;
+		}
+		return false;
+	};
+	std::erase_if(m_trails.active, tick_trail);
+}
+
+void Rain::set_density(float const density) {
+	m_info.density = std::clamp(density, 0.1f, limits::density_v.hi);
+	m_spawn_rate = kvf::Seconds{60.0f / (m_info.density * m_info.world_size.x)};
+}
+
+void Rain::create_trails() {
+	auto const capacity = std::size_t(m_info.max_trail_count);
+	m_trails.storage.reserve(capacity);
+	m_trails.inactive.reserve(capacity);
+	m_trails.active.reserve(capacity);
+	for (auto i = 0uz; i < capacity; ++i) {
+		auto& trail = m_trails.storage.emplace_back(m_random, m_font, m_info.trail_ci);
+		trail.randomize_cells(m_cell_count);
+		m_trails.inactive.emplace_back(&trail);
+	}
 }
 
 auto Rain::next_inactive_trail() -> klib::Ptr<Trail> {
-	for (auto& trail : m_trails) {
-		if (trail.get_status() == Trail::Status::Completed) { return &trail; }
-	}
+	if (m_trails.inactive.empty()) { return nullptr; }
 
-	if (int(m_trails.size()) >= m_info.max_trail_count) { return nullptr; }
-
-	auto& ret = m_trails.emplace_back(m_random, m_font, m_info.trail_ci);
-	ret.randomize_cells(m_cell_count);
-	return &ret;
+	m_trails.active.push_back(m_trails.inactive.back());
+	m_trails.inactive.pop_back();
+	return m_trails.active.back();
 }
 
 void Rain::spawn_trail() {
@@ -605,9 +630,16 @@ class App {
 	}
 
 	void bind_actions() {
-		m_action_mapping.bind_action(&m_exit, [this](le::input::action::Value const& v) {
-			if (v.get<bool>()) { m_context->set_window_close(); }
-		});
+		if (m_config.keybind_exit_escape) {
+			m_action_mapping.bind_action(&m_actions.exit, [this](le::input::action::Value const& v) {
+				if (v.get<bool>()) { m_context->set_window_close(); }
+			});
+		}
+		if (m_config.keybind_stats_f1) {
+			m_action_mapping.bind_action(&m_actions.stats, [this](le::input::action::Value const& v) {
+				if (v.get<bool>()) { m_show_stats = true; }
+			});
+		}
 
 		m_input_router.push_mapping(&m_action_mapping);
 	}
@@ -618,8 +650,7 @@ class App {
 		while (m_context->is_running()) {
 			m_context->next_frame();
 
-			m_input_router.dispatch(m_context->event_queue());
-			m_rain->tick(m_context->get_frame_stats().frame_dt);
+			tick(m_context->get_frame_stats().frame_dt);
 
 			auto& renderer = m_context->begin_render();
 			render(renderer);
@@ -628,9 +659,38 @@ class App {
 		}
 	}
 
+	void tick(kvf::Seconds const dt) {
+		m_input_router.dispatch(m_context->event_queue());
+		m_rain->tick(dt);
+		draw_stats();
+	}
+
+	void draw_stats() {
+		if (!m_show_stats) { return; }
+
+		ImGui::SetNextWindowSize({180.0f, -1.0f}, ImGuiCond_Once);
+		ImGui::Begin("Stats", &m_show_stats);
+
+		auto const& fs = m_context->get_frame_stats();
+		ImGui::TextUnformatted(klib::FixedString{"FPS: {}", fs.framerate}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"vsync: {}", le::vsync_name_map.to_name(m_context->get_vsync())}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"uptime: {:.0f}s", fs.run_time.count()}.c_str());
+
+		ImGui::TextUnformatted(klib::FixedString{"draws: {}", m_render_stats.draw_calls}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"tris: {}", m_render_stats.triangles}.c_str());
+
+		auto density = m_rain->get_density();
+		ImGui::SetNextItemWidth(100.0f);
+		if (ImGui::DragFloat("density", &density, 0.25f, 0.25f, limits::density_v.hi, "%.2f")) { m_rain->set_density(density); }
+
+		ImGui::End();
+	}
+
 	void render(le::IRenderer& renderer) const {
 		renderer.view.position.y = -0.5f * float(renderer.framebuffer_size().y);
 		m_rain->draw(renderer);
+		m_render_stats = renderer.get_stats();
 	}
 
 	detail::Config m_config{};
@@ -645,9 +705,15 @@ class App {
 
 	le::input::Router m_input_router{};
 	le::input::ActionMapping m_action_mapping{};
-	le::input::action::KeyDigital m_exit{GLFW_KEY_ESCAPE};
+
+	struct {
+		le::input::action::KeyDigital exit{GLFW_KEY_ESCAPE};
+		le::input::action::KeyDigital stats{GLFW_KEY_F1};
+	} m_actions{};
 
 	std::optional<detail::Rain> m_rain{};
+	mutable le::RenderStats m_render_stats{};
+	bool m_show_stats{};
 
 	le::Context::Waiter m_waiter{};
 };
@@ -657,9 +723,9 @@ class App {
 
 } // namespace raintrix
 
-auto raintrix::generate_config(std::string const& path) -> bool {
-	auto const config = detail::Config{};
-	return config.save_to(path);
+auto raintrix::generate_config() -> std::string {
+	static auto const s_config = detail::Config{};
+	return s_config.to_string();
 }
 
 void raintrix::run_trix(std::string const& config_path) { App{}.run(config_path); }

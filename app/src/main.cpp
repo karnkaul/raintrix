@@ -10,7 +10,10 @@ class App {
 		auto const parse_result = parse_args(argc, argv);
 		if (parse_result.should_early_exit()) { return parse_result.return_code(); }
 
-		if (m_generate_config) { return generate_config(); }
+		if (m_generate_config) {
+			std::println("{}", raintrix::generate_config());
+			return EXIT_SUCCESS;
+		}
 
 		raintrix::run_trix(m_config_path);
 		return EXIT_SUCCESS;
@@ -32,17 +35,6 @@ class App {
 		};
 		auto parser = clap::Parser{std::move(spec)};
 		return parser.parse_main(argc, argv);
-	}
-
-	[[nodiscard]] auto generate_config() -> int {
-		if (m_config_path.empty()) { m_config_path = raintrix::defaults::config_path; }
-		auto const result = raintrix::generate_config(m_config_path);
-		if (!result) {
-			std::println(stderr, "Failed to store generated config to '{}'", m_config_path);
-			return EXIT_FAILURE;
-		}
-		std::println("Config generated to '{}'", m_config_path);
-		return EXIT_SUCCESS;
 	}
 
 	std::string m_config_path{};

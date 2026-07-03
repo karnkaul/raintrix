@@ -23,13 +23,11 @@ class Reader {
 
 class Writer {
   public:
-	void write_header(std::string_view text);
+	void write_header(std::string_view in);
 	void write_variable(IVariable const& variable, std::string_view description = {}, WriteStatus status = WriteStatus::Commented);
 
-	[[nodiscard]] auto get_text() const -> std::string_view { return m_text; }
 	[[nodiscard]] auto write_to(klib::CString path) const -> bool;
 
-  private:
-	std::string m_text{};
+	std::string text{};
 };
 } // namespace raintrix::cfg

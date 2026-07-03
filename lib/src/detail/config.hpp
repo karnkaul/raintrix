@@ -17,10 +17,12 @@ struct Config {
 	struct Post;
 
 	auto load_from(klib::CString path) -> bool;
-	[[nodiscard]] auto save_to(klib::CString path) const -> bool;
+	[[nodiscard]] auto to_string() const -> std::string;
 
 	// Window.
 	cfg::Variable<std::string> resolution{"RESOLUTION", std::string{defaults::resolution_v}};
+	cfg::Variable<bool> keybind_exit_escape{"KEYBIND_EXIT_ESCAPE", true};
+	cfg::Variable<bool> keybind_stats_f1{"KEYBIND_STATS_F1", false};
 
 	// Trails.
 	cfg::Variable<std::string> font_path{"FONT_PATH"};
