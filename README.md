@@ -13,6 +13,20 @@ https://github.com/user-attachments/assets/0c12ca45-4e63-473c-9ad0-8729425c21d8
 - (Windows) Latest C++ Runtime
 - (Linux) libc, libm, libgcc
 
+## Usage
+
+Download the [latest release](https://github.com/karnkaul/raintrix/releases) or build from source, and run the executable. Pass `--generate` to print generated (default) configuration to standard output.
+
+## Features
+
+All supported features are exposed through the configuration file. Generated config has annotated fields.
+
+- Customizable font
+- Customizable character set to sample glyphs from (ASCII only)
+- Fullscreen or windowed
+- Customizable tint, max trails, density, tile height, max depth, and speed
+- Keybind to show statistics (and tweak density)
+
 ## Attribution
 
 - [Sketch font](https://www.fontspace.com/sketch-font-f26335) (embedded into binary)
