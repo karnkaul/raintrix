@@ -223,7 +223,7 @@ auto Config::to_string() const -> std::string {
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
 	writer.write_variable(tile_height, std::format("glyph tile height (== width) {}", serialize(limits::tile_height_v)));
-	writer.write_variable(char_set, "set to sample characters from (non-empty)");
+	writer.write_variable(char_set, "set to sample characters from (non-empty, ASCII-only)");
 	writer.write_variable(trail_tint, "tint (color) of trail in 4-channel hex form (#RRGGBBAA) (alpha must be ff)");
 
 	writer.write_header("Rain");
