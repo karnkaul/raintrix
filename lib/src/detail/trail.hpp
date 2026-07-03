@@ -21,6 +21,8 @@ class Trail : public le::IDrawable {
 
 	void draw(le::IRenderer& renderer) const final { m_column.draw(renderer); }
 
+	void setup_render_instance(le::Transform const& transform) { m_column.setup_render_instance(transform); }
+
 	void tick(kvf::Seconds dt);
 
 	void randomize_cells(int count);
@@ -28,7 +30,6 @@ class Trail : public le::IDrawable {
 
 	[[nodiscard]] auto get_status() const -> Status;
 
-	le::Transform transform{};
 	kvf::Seconds fade_rate{1s};
 
   private:

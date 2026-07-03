@@ -295,6 +295,8 @@ void Column::setup_tiles(le::IFontAtlas const& font_atlas, std::string_view cons
 	m_atlas = &font_atlas.get_texture();
 }
 
+void Column::setup_render_instance(le::Transform const& transform) { m_render_instance = le::RenderInstance{.transform = transform}.to_std430(); }
+
 auto Column::quad_count() const -> std::size_t { return m_tiles.vertices.size() / le::shape::Quad::vertex_count_v; }
 
 auto Column::quad_at(std::size_t const index) -> QuadViewMut { return get_quad_at<QuadViewMut>(index); }
@@ -309,11 +311,7 @@ void Column::draw(le::IRenderer& renderer) const {
 		.indices = m_tiles.indices,
 		.texture = m_atlas,
 	};
-	auto const render_instance = le::RenderInstance{
-		.transform = transform,
-		.tint = tint,
-	};
-	renderer.draw(primitive, {&render_instance, 1});
+	renderer.draw_baked(primitive, {&m_render_instance, 1});
 }
 
 template <typename T, typename Self>
@@ -343,7 +341,6 @@ void Trail::tick(kvf::Seconds const dt) {
 		m_ttl_remain -= dt;
 		if (m_ttl_remain <= 0s) { deactivate(); }
 	}
-	m_column.transform = transform;
 }
 
 void Trail::randomize_cells(int const count) {
@@ -506,13 +503,15 @@ void Rain::spawn_trail() {
 	auto trail = next_inactive_trail();
 	if (!trail) { return; }
 
+	auto transform = le::Transform{};
 	auto const half_width = 0.5f * m_info.world_size.x;
-	trail->transform.position.x = m_random->next_float(-half_width, half_width);
+	transform.position.x = m_random->next_float(-half_width, half_width);
 
 	if (m_info.max_depth > 1.0f) {
 		auto const min_scale = 1.0f / m_info.max_depth;
-		trail->transform.scale = glm::vec2{m_random->next_float(min_scale, 1.0f)};
+		transform.scale = glm::vec2{m_random->next_float(min_scale, 1.0f)};
 	}
+	trail->setup_render_instance(transform);
 
 	auto const speed = m_info.speed * m_random->next_float(10.0f, 20.0f);
 	auto const ttl = m_base_ttl * (m_random->next_float(0.8f, 1.6f) / m_info.speed);
@@ -688,7 +687,9 @@ class App {
 	}
 
 	void render(le::IRenderer& renderer) const {
-		renderer.view.position.y = -0.5f * float(renderer.framebuffer_size().y);
+		auto view = le::Transform{};
+		view.position.y = -0.5f * float(renderer.framebuffer_size().y);
+		renderer.set_view(view);
 		m_rain->draw(renderer);
 		m_render_stats = renderer.get_stats();
 	}
