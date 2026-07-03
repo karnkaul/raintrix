@@ -12,13 +12,11 @@ class Column : public le::IDrawable {
 	void draw(le::IRenderer& renderer) const final;
 
 	void setup_tiles(le::IFontAtlas const& font_atlas, std::string_view text, float tile_height = 128.0f);
+	void setup_render_instance(le::Transform const& transform);
 
 	[[nodiscard]] auto quad_count() const -> std::size_t;
 	[[nodiscard]] auto quad_at(std::size_t index) -> QuadViewMut;
 	[[nodiscard]] auto quad_at(std::size_t index) const -> QuadView;
-
-	le::Transform transform{};
-	kvf::Color tint{kvf::white_v};
 
   private:
 	template <typename T, typename Self>
@@ -26,5 +24,6 @@ class Column : public le::IDrawable {
 
 	klib::Ptr<le::ITexture const> m_atlas{};
 	le::VertexArray m_tiles{};
+	le::RenderInstance::Std430 m_render_instance{};
 };
 } // namespace raintrix::detail
