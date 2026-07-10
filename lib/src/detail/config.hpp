@@ -23,6 +23,7 @@ struct Config {
 	cfg::Variable<std::string> resolution{"RESOLUTION", std::string{defaults::resolution_v}};
 	cfg::Variable<bool> keybind_exit_escape{"KEYBIND_EXIT_ESCAPE", true};
 	cfg::Variable<bool> keybind_stats_f1{"KEYBIND_STATS_F1", false};
+	cfg::Variable<std::string> vsync{"VSYNC"};
 
 	// Trails.
 	cfg::Variable<std::string> font_path{"FONT_PATH"};

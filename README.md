@@ -25,7 +25,7 @@ All supported features are exposed through the configuration file. Generated con
 - Customizable character set to sample glyphs from (ASCII only)
 - Fullscreen or windowed
 - Customizable tint, max trails, density, tile height, max depth, and speed
-- Keybind to show statistics (and tweak density)
+- Keybind to show statistics (and tweak density / vsync)
 
 ## Attribution
 

@@ -190,6 +190,25 @@ template <typename LimitT>
 	static constexpr auto upper_v = cmp_symbol<Type, UpperT>();
 	return std::format("{}{}, {}{}", lower_v, limit.lo, limit.hi, upper_v);
 }
+
+void join_to(std::string& out, std::string_view const value, std::string_view const delimiter) {
+	if (value.empty()) { return; }
+	if (!out.empty()) { out.append(delimiter); }
+	out.append(value);
+}
+
+[[nodiscard]] auto join_vsync(std::string_view const delimiter = "|") {
+	auto ret = std::string{};
+	for (auto const& [_, name] : le::vsync_name_map.as_span()) { join_to(ret, name, delimiter); }
+	return ret;
+}
+
+[[nodiscard]] auto to_vsync(std::span<le::Vsync const> supported, std::string_view const input) -> std::optional<le::Vsync> {
+	auto const desired = le::vsync_name_map.to_enum(input);
+	if (!desired) { return {}; }
+	if (std::ranges::find(supported, *desired) == supported.end()) { return {}; }
+	return *desired;
+}
 } // namespace
 
 auto Config::load_from(klib::CString const path) -> bool {
@@ -198,6 +217,7 @@ auto Config::load_from(klib::CString const path) -> bool {
 	reader.track_variable(resolution);
 	reader.track_variable(keybind_exit_escape);
 	reader.track_variable(keybind_stats_f1);
+	reader.track_variable(vsync);
 
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
@@ -219,6 +239,7 @@ auto Config::to_string() const -> std::string {
 	writer.write_variable(resolution, "resolution (fullscreen|WxH)");
 	writer.write_variable(keybind_exit_escape, "exit on Escape (boolean)");
 	writer.write_variable(keybind_stats_f1, "F1 to show Stats (boolean)");
+	writer.write_variable(vsync, std::format("desired vertical sync, falls back to {} ({})", le::vsync_name_map.to_name(le::Vsync::Strict), join_vsync()));
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
@@ -612,6 +633,11 @@ class App {
 		m_context = le::Context::create(context_ci);
 		if (!m_context) { throw Panic{"Failed to create Context"}; }
 
+		if (!m_config.vsync.value.empty()) {
+			auto const supported_vsync = m_context->get_supported_vsync();
+			if (auto const desired_vsync = detail::to_vsync(supported_vsync, m_config.vsync.value)) { m_context->set_vsync(*desired_vsync); }
+		}
+
 		m_waiter = m_context->create_waiter();
 
 		ImGui::GetIO().IniFilename = nullptr;
@@ -673,16 +699,26 @@ class App {
 		auto const& fs = m_context->get_frame_stats();
 		ImGui::TextUnformatted(klib::FixedString{"FPS: {}", fs.framerate}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"vsync: {}", le::vsync_name_map.to_name(m_context->get_vsync())}.c_str());
-		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", dt.count() * 1000.0f}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"ft: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"uptime: {:.0f}s", fs.run_time.count()}.c_str());
-		ImGui::TextUnformatted(klib::FixedString{"passed dt: {:.1f}ms", dt.count() * 1000.0f}.c_str());
 
 		ImGui::TextUnformatted(klib::FixedString{"draws: {}", m_render_stats.draw_calls}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"tris: {}", m_render_stats.triangles}.c_str());
 
+		ImGui::Separator();
 		auto density = m_rain->get_density();
 		ImGui::SetNextItemWidth(100.0f);
 		if (ImGui::DragFloat("density", &density, 0.25f, 0.25f, limits::density_v.hi, "%.2f")) { m_rain->set_density(density); }
+
+		auto const current_vsync = m_context->get_vsync();
+		ImGui::SetNextItemWidth(100.0f);
+		if (ImGui::BeginCombo("vsync", le::vsync_name_map.to_name(current_vsync).data())) {
+			for (auto const vsync : m_context->get_supported_vsync()) {
+				if (ImGui::Selectable(le::vsync_name_map.to_name(vsync).data(), vsync == current_vsync)) { m_context->set_vsync(vsync); }
+			}
+			ImGui::EndCombo();
+		}
 
 		ImGui::End();
 	}
