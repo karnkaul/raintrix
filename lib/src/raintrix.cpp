@@ -229,6 +229,8 @@ auto Config::load_from(klib::CString const path) -> bool {
 	reader.track_variable(max_depth);
 	reader.track_variable(speed);
 
+	reader.track_variable(undocumented.start_paused);
+
 	return reader.parse_file(path);
 }
 
@@ -607,6 +609,7 @@ class App {
 			log.warn("failed to load Config from '{}'", path);
 		}
 		m_post_config = detail::Config::Post::process(m_config);
+		m_paused = m_config.undocumented.start_paused.value;
 	}
 
 	void load_font_bytes() {
@@ -666,6 +669,10 @@ class App {
 			});
 		}
 
+		m_action_mapping.bind_action(&m_actions.start, [this](le::input::action::Value const& v) {
+			if (v.get<bool>()) { m_paused = false; }
+		});
+
 		m_input_router.push_mapping(&m_action_mapping);
 	}
 
@@ -686,7 +693,7 @@ class App {
 
 	void tick(kvf::Seconds const dt) {
 		m_input_router.dispatch(m_context->event_queue());
-		m_rain->tick(dt);
+		if (!m_paused) { m_rain->tick(dt); }
 		draw_stats(dt);
 	}
 
@@ -719,6 +726,7 @@ class App {
 			}
 			ImGui::EndCombo();
 		}
+		ImGui::Checkbox("pause", &m_paused);
 
 		ImGui::End();
 	}
@@ -747,11 +755,13 @@ class App {
 	struct {
 		le::input::action::KeyDigital exit{GLFW_KEY_ESCAPE};
 		le::input::action::KeyDigital stats{GLFW_KEY_F1};
+		le::input::action::KeyDigital start{GLFW_KEY_SPACE};
 	} m_actions{};
 
 	std::optional<detail::Rain> m_rain{};
 	mutable le::RenderStats m_render_stats{};
 	bool m_show_stats{};
+	bool m_paused{};
 
 	le::Context::Waiter m_waiter{};
 };

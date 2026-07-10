@@ -36,6 +36,10 @@ struct Config {
 	cfg::Variable<float> density{"DENSITY", defaults::density_v};
 	cfg::Variable<float> max_depth{"MAX_DEPTH", defaults::max_depth_v};
 	cfg::Variable<float> speed{"SPEED", defaults::speed_v};
+
+	struct {
+		cfg::Variable<bool> start_paused{"START_PAUSED", false};
+	} undocumented{};
 };
 
 struct Config::Post {
