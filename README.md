@@ -2,7 +2,7 @@
 
 **Matrix-inspired text rain effect**
 
-https://github.com/user-attachments/assets/0c12ca45-4e63-473c-9ad0-8729425c21d8
+https://github.com/user-attachments/assets/f2f335c9-afc0-4722-b4ee-2c8952369467
 
 [![Build Status](https://github.com/karnkaul/raintrix/actions/workflows/ci.yml/badge.svg)](https://github.com/karnkaul/raintrix/actions/workflows/ci.yml)
 
