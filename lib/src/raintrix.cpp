@@ -641,6 +641,9 @@ class App {
 			if (auto const desired_vsync = detail::to_vsync(supported_vsync, m_config.vsync.value)) { m_context->set_vsync(*desired_vsync); }
 		}
 
+		auto const& gpu_name = m_context->get_render_device().get_gpu().properties.deviceName;
+		m_gpu_name = std::string_view{gpu_name.data(), gpu_name.size()};
+
 		m_waiter = m_context->create_waiter();
 
 		ImGui::GetIO().IniFilename = nullptr;
@@ -700,18 +703,21 @@ class App {
 	void draw_stats(kvf::Seconds const dt) {
 		if (!m_show_stats) { return; }
 
-		ImGui::SetNextWindowSize({180.0f, -1.0f}, ImGuiCond_Once);
+		ImGui::SetNextWindowSize({200.0f, -1.0f}, ImGuiCond_Once);
 		ImGui::Begin("Stats", &m_show_stats);
 
 		auto const& fs = m_context->get_frame_stats();
+		ImGui::TextUnformatted(klib::FixedString{"GPU: {}", m_gpu_name}.c_str());
+		auto const& swapchain_extent = m_context->swapchain_extent();
+		ImGui::TextUnformatted(klib::FixedString{"res: {}x{}", swapchain_extent.width, swapchain_extent.height}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"FPS: {}", fs.framerate}.c_str());
-		ImGui::TextUnformatted(klib::FixedString{"vsync: {}", le::vsync_name_map.to_name(m_context->get_vsync())}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", dt.count() * 1000.0f}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"ft: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"uptime: {:.0f}s", fs.run_time.count()}.c_str());
 
-		ImGui::TextUnformatted(klib::FixedString{"draws: {}", m_render_stats.draw_calls}.c_str());
-		ImGui::TextUnformatted(klib::FixedString{"tris: {}", m_render_stats.triangles}.c_str());
+		auto const& rs = m_context->get_renderer().get_stats();
+		ImGui::TextUnformatted(klib::FixedString{"draws: {}", rs.draw_calls}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"tris: {}", rs.triangles}.c_str());
 
 		ImGui::Separator();
 		auto density = m_rain->get_density();
@@ -736,13 +742,13 @@ class App {
 		view.position.y = -0.5f * float(renderer.framebuffer_size().y);
 		renderer.set_view(view);
 		m_rain->draw(renderer);
-		m_render_stats = renderer.get_stats();
 	}
 
 	detail::Config m_config{};
 	detail::Config::Post m_post_config{};
 
 	std::unique_ptr<le::Context> m_context{};
+	std::string m_gpu_name{};
 
 	std::vector<std::byte> m_font_bytes{};
 	std::unique_ptr<le::IFont> m_font{};
@@ -759,7 +765,6 @@ class App {
 	} m_actions{};
 
 	std::optional<detail::Rain> m_rain{};
-	mutable le::RenderStats m_render_stats{};
 	bool m_show_stats{};
 	bool m_paused{};
 
