@@ -619,8 +619,8 @@ class App {
 
 	void create_font() {
 		auto const& resource_factory = m_context->get_resource_factory();
-		m_font = resource_factory.create_font();
-		if (!m_font->load_face(std::move(m_font_bytes))) { throw Panic{std::format("Failed to load font: '{}'", m_config.font_path.value)}; }
+		m_font = resource_factory.create_font(std::move(m_font_bytes));
+		if (!m_font) { throw Panic{std::format("Failed to load font: '{}'", m_config.font_path.value)}; }
 	}
 
 	void create_rain() {
@@ -631,7 +631,7 @@ class App {
 	void bind_actions() {
 		if (m_config.keybind_exit_escape) {
 			m_action_mapping.bind_action(&m_actions.exit, [this](le::input::action::Value const& v) {
-				if (v.get<bool>()) { m_context->set_window_close(); }
+				if (v.get<bool>()) { m_context->set_window_should_close(); }
 			});
 		}
 		if (m_config.keybind_stats_f1) {
@@ -649,7 +649,7 @@ class App {
 		while (m_context->is_running()) {
 			m_context->next_frame();
 
-			tick(m_context->get_frame_stats().frame_dt);
+			tick(m_context->get_frame_stats().total_dt);
 
 			auto& renderer = m_context->begin_render();
 			render(renderer);
@@ -661,10 +661,10 @@ class App {
 	void tick(kvf::Seconds const dt) {
 		m_input_router.dispatch(m_context->event_queue());
 		m_rain->tick(dt);
-		draw_stats();
+		draw_stats(dt);
 	}
 
-	void draw_stats() {
+	void draw_stats(kvf::Seconds const dt) {
 		if (!m_show_stats) { return; }
 
 		ImGui::SetNextWindowSize({180.0f, -1.0f}, ImGuiCond_Once);
@@ -675,6 +675,7 @@ class App {
 		ImGui::TextUnformatted(klib::FixedString{"vsync: {}", le::vsync_name_map.to_name(m_context->get_vsync())}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"uptime: {:.0f}s", fs.run_time.count()}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"passed dt: {:.1f}ms", dt.count() * 1000.0f}.c_str());
 
 		ImGui::TextUnformatted(klib::FixedString{"draws: {}", m_render_stats.draw_calls}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"tris: {}", m_render_stats.triangles}.c_str());
