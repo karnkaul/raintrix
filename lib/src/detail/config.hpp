@@ -24,6 +24,7 @@ struct Config {
 	cfg::Variable<bool> keybind_exit_escape{"KEYBIND_EXIT_ESCAPE", true};
 	cfg::Variable<bool> keybind_stats_f1{"KEYBIND_STATS_F1", false};
 	cfg::Variable<std::string> vsync{"VSYNC"};
+	cfg::Variable<int> max_framerate{"MAX_FRAMERATE", 0};
 
 	// Trails.
 	cfg::Variable<std::string> font_path{"FONT_PATH"};

@@ -23,6 +23,7 @@
 #include <array>
 #include <fstream>
 #include <optional>
+#include <thread>
 
 namespace raintrix {
 
@@ -218,6 +219,7 @@ auto Config::load_from(klib::CString const path) -> bool {
 	reader.track_variable(keybind_exit_escape);
 	reader.track_variable(keybind_stats_f1);
 	reader.track_variable(vsync);
+	reader.track_variable(max_framerate);
 
 	reader.track_variable(font_path);
 	reader.track_variable(tile_height);
@@ -240,6 +242,7 @@ auto Config::to_string() const -> std::string {
 	writer.write_variable(keybind_exit_escape, "exit on Escape (boolean)");
 	writer.write_variable(keybind_stats_f1, "F1 to show Stats (boolean)");
 	writer.write_variable(vsync, std::format("desired vertical sync, falls back to {} ({})", le::vsync_name_map.to_name(le::Vsync::Strict), join_vsync()));
+	writer.write_variable(max_framerate, "framerate limit (0 = no limit)");
 
 	writer.write_header("Trails");
 	writer.write_variable(font_path, "path to custom font file");
@@ -676,6 +679,8 @@ class App {
 		m_context->set_visible(true);
 
 		while (m_context->is_running()) {
+			m_frame_start = kvf::Clock::now();
+
 			m_context->next_frame();
 
 			tick(m_context->get_frame_stats().total_dt);
@@ -684,6 +689,8 @@ class App {
 			render(renderer);
 
 			m_context->present();
+
+			if (m_config.max_framerate.value > 0) { limit_framerate(); }
 		}
 	}
 
@@ -691,6 +698,14 @@ class App {
 		m_input_router.dispatch(m_context->event_queue());
 		if (!m_paused) { m_rain->tick(dt); }
 		draw_stats(dt);
+	}
+
+	void limit_framerate() {
+		auto const min_frame_time = kvf::Seconds{1.0f / float(m_config.max_framerate.value)};
+		auto const frame_time = kvf::Seconds{kvf::Clock::now() - m_frame_start};
+		auto const delta = min_frame_time - frame_time;
+		if (delta <= 0s) { return; }
+		std::this_thread::sleep_for(delta);
 	}
 
 	void draw_stats(kvf::Seconds const dt) {
@@ -705,7 +720,8 @@ class App {
 		ImGui::TextUnformatted(klib::FixedString{"res: {}x{}", swapchain_extent.width, swapchain_extent.height}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"FPS: {}", fs.framerate}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"dt: {:.1f}ms", dt.count() * 1000.0f}.c_str());
-		ImGui::TextUnformatted(klib::FixedString{"ft: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"frame time: {:.1f}ms", fs.frame_dt.count() * 1000.0f}.c_str());
+		ImGui::TextUnformatted(klib::FixedString{"render time: {:.1f}ms", (fs.total_dt - fs.frame_dt).count() * 1000.0f}.c_str());
 		ImGui::TextUnformatted(klib::FixedString{"uptime: {:.0f}s", fs.run_time.count()}.c_str());
 
 		auto const& rs = m_context->get_renderer().get_stats();
@@ -759,6 +775,8 @@ class App {
 	std::optional<detail::Rain> m_rain{};
 	bool m_show_stats{};
 	bool m_paused{};
+
+	kvf::Clock::time_point m_frame_start{};
 
 	le::Context::Waiter m_waiter{};
 };
