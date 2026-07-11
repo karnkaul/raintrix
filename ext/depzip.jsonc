@@ -2,7 +2,7 @@
   "packages": [
     {
       "uri": "karnkaul/le2d",
-      "branch": "v0.4.11"
+      "branch": "v0.5.1"
     },
     {
       "uri": "karnkaul/clap",

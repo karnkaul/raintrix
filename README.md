@@ -2,7 +2,7 @@
 
 **Matrix-inspired text rain effect**
 
-https://github.com/user-attachments/assets/0c12ca45-4e63-473c-9ad0-8729425c21d8
+https://github.com/user-attachments/assets/3ee7997a-15fe-4185-9704-211b94b366d8
 
 [![Build Status](https://github.com/karnkaul/raintrix/actions/workflows/ci.yml/badge.svg)](https://github.com/karnkaul/raintrix/actions/workflows/ci.yml)
 
@@ -25,7 +25,7 @@ All supported features are exposed through the configuration file. Generated con
 - Customizable character set to sample glyphs from (ASCII only)
 - Fullscreen or windowed
 - Customizable tint, max trails, density, tile height, max depth, and speed
-- Keybind to show statistics (and tweak density)
+- Keybind to show statistics (and tweak density / vsync)
 
 ## Attribution
 
